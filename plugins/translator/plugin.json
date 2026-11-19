@@ -1,0 +1,27 @@
+{
+  "Id": "translator",
+  "Name": "文本翻译",
+  "Version": "0.5.0",
+  "Author": "LiyueDev",
+  "Description": "复制/输入文本，一键翻译。默认「离线翻译」（Argos 模型，约 70MB，免 key、隐私、无需联网，开箱即用）；右上角可切「Hy-MT2 1.8B」（腾讯混元，约 1.1GB，翻译质量更高）或「Hy-MT2 7B」（约 4.6GB，长句与专业内容最稳）。本地大模型首次下载后完全离线，进程常驻可手动「启动/停止」释放内存。",
+  "Icon": "",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": [
+    "翻译",
+    "translate",
+    "fanyi",
+    "fy",
+    "中英互译"
+  ],
+  "Permissions": [
+    "clipboard",
+    "config",
+    "network"
+  ],
+  "Config": {
+    "backend": "offline",
+    "models_dir": "",
+    "engine_idle_release": 300
+  }
+}

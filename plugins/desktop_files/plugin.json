@@ -1,0 +1,40 @@
+{
+  "Id": "desktop_files",
+  "Name": "桌面净化",
+  "Version": "0.1.2",
+  "Author": "LiyueDev",
+  "Description": "一键隐藏/显示桌面图标，让桌面保持干净；同时把桌面上的所有文件和文件夹变成可搜索列表：双击或回车直接打开，右键可在资源管理器中定位。退出程序会自动恢复图标。",
+  "Icon": "",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": [
+    "桌面",
+    "桌面净化",
+    "净化",
+    "桌面文件",
+    "文件",
+    "文件夹",
+    "desktop",
+    "zhuomian",
+    "desktopfiles",
+    "图标",
+    "隐藏图标"
+  ],
+  "Permissions": [
+    "config",
+    "notification"
+  ],
+  "Hotkey": "Alt+D",
+  "Config": {
+    "auto_restore_on_exit": true,
+    "restore_on_window_close": false,
+    "hide_mode": "fences",
+    "include_public_desktop": true,
+    "show_hidden_files": false,
+    "exclude_shortcuts": true,
+    "max_items": 500,
+    "allow_showwindow_fallback": false,
+    "pinyin_search": false,
+    "sort_by": "type"
+  }
+}

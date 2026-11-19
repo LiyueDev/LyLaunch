@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# 本地运行数据（非源码，不入库）
+*.json
+!plugins/**/plugin.json
+!plugin_pack/**/plugin.json
+
+# 编辑器 / 系统
+.vs/
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+
+# 日志
+*.log
+
+# 防止本地 AI 记忆与内部文档回灌到开源仓库
+.workbuddy/
+AGENT.md
+CURRENT.md
+WORKFLOW.md
+PROJECT.md
+记忆文档.md
+doc/archive/
+求职材料/
+ui-prototype/
+website/
+tools/
+
+# 构建产物（本项目交付源码，不入库）
+build/
+dist/
+dist_plugins/
+installer/
+models/
+plugins/translator/models/
+runtime/
+*.spec
+*.exe
+*.msi

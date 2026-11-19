@@ -1,0 +1,13 @@
+{
+  "Id": "screenshot",
+  "Name": "截图",
+  "Version": "0.1.0",
+  "Author": "LiyueDev",
+  "Description": "框选截图并自动复制到剪贴板。支持多显示器与 HiDPI，单击截整屏，Esc 取消",
+  "Icon": "",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": ["截图", "截屏", "screenshot", "capture", "剪贴板图片", "区域截图"],
+  "Permissions": ["clipboard"],
+  "Config": {}
+}

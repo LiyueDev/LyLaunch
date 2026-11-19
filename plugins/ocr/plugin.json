@@ -1,0 +1,32 @@
+{
+  "Id": "ocr",
+  "Name": "图片转文字",
+  "Version": "0.5.3",
+  "Author": "LiyueDev",
+  "Description": "从截图/图片中提取文字。默认用包内 PP-OCRv6（纯离线、约 30MB、毫秒级，小图自动放大、按阅读顺序重排、过滤低置信度噪声）；可选本地大模型识别：Xiaomi-OCR-0（表格 / 公式 / 手写更稳）或 OvisOCR2（多栏 / 密集表格更准），两个模型与「文档识别」共用同一套权重和引擎（只占一份内存），输出自动转纯文本（表格用制表符分列，可直接粘进 Excel）。支持剪贴板截图自动识别、本地图片、直接拖入窗口，结果一键复制或直接送翻译",
+  "Icon": "",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": [
+    "ocr",
+    "识别",
+    "文字识别",
+    "截图识别",
+    "图片文字",
+    "图片转文字",
+    "OCR"
+  ],
+  "Permissions": [
+    "clipboard",
+    "config"
+  ],
+  "Config": {
+    "engine": "ppocr",
+    "keep_model_engine": false,
+    "min_confidence": 0.5,
+    "auto_scan_clipboard": true,
+    "upscale_small": true,
+    "auto_space_mixed": true,
+    "engine_idle_release": 300
+  }
+}

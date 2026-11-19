@@ -1,0 +1,13 @@
+{
+  "Id": "hwinfo",
+  "Name": "硬件信息",
+  "Version": "0.1.1",
+  "Author": "LiyueDev",
+  "Description": "查看本机硬件概况：处理器、主板、内存、显卡、存储",
+  "Icon": "",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": ["硬件", "配置", "显卡", "主板", "cpu", "yingjian", "peizhi", "hardware"],
+  "Permissions": ["clipboard", "config"],
+  "Config": {}
+}

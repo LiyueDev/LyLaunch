@@ -1,0 +1,30 @@
+# ── LyLaunch 运行依赖 ──────────────────────────────────────────────
+# 安装：python -m pip install -r requirements.txt
+# ⚠️ 必须用「启动 main.py 的那个 Python」装，否则运行时 No module named...
+# ⚠️ 需要 Python 3.10 – 3.14：PySide6 6.11.x 要求 <3.15，用 3.15 会装不上。
+
+# 基础功能
+PySide6==6.11.3
+pywin32>=306
+pypinyin>=0.50
+
+# ── 插件依赖（2026-08-20）────────────────────────────────────────────
+# 翻译插件（离线优先后端）
+ctranslate2>=4.8
+sentencepiece>=0.2
+
+# OCR 插件（纯离线，含 onnxruntime/opencv 传递依赖）
+# 旧包 rapidocr-onnxruntime (PP-OCRv3) 已停止维护并卸载；0.36 起用 rapidocr 3.x / PP-OCRv6
+rapidocr>=3.10.0
+
+# 翻译插件可选在线后端（默认离线用不到；想切 google 时再装）
+# deep-translator>=1.11
+
+# requests：rapidocr / onnxruntime 与可选 google 在线后端（deep-translator）的传递依赖，
+# 打包也会 collect_all，必须进 requirements 才能在真机装上。
+requests>=2.31
+
+# Pillow：桌面文件插件「换文件夹图标」要用它合成多尺寸 ico（folder_icon.make_tile_ico）。
+# 以前是 rapidocr 的传递依赖，等于靠别人捎带 —— 单独列出来，别让功能跟着别人的依赖走。
+Pillow>=10.0
+

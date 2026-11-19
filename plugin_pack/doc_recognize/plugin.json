@@ -1,0 +1,40 @@
+{
+  "Id": "doc_recognize",
+  "Name": "文档识别",
+  "Version": "0.2.2",
+  "Author": "LiyueDev",
+  "Description": "本地大模型识别文档：支持批量拖入 PDF / 图片 / Excel / Word / 纯文本，表格还原成 Markdown、公式手写都能读，输出可直接使用。可选 Xiaomi-OCR-0 / OvisOCR2 两种识别模型，按需下载（各约 700MB），之后完全离线",
+  "Icon": "",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": [
+    "文档识别",
+    "表格识别",
+    "公式识别",
+    "手写识别",
+    "markdown",
+    "结构化",
+    "wdsb",
+    "gssb",
+    "dococr",
+    "xiaomi",
+    "ovisocr2",
+    "pdf",
+    "excel",
+    "word",
+    "批量"
+  ],
+  "Permissions": [
+    "clipboard",
+    "config"
+  ],
+  "Data": [
+    "doc_recognize"
+  ],
+  "Config": {
+    "auto_start": true,
+    "idle_release": 300,
+    "port": 18081,
+    "model_id": "xiaomi-ocr-0"
+  }
+}

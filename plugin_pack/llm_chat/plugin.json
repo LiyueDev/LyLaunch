@@ -1,0 +1,36 @@
+{
+  "Id": "llm_chat",
+  "Name": "本地 AI",
+  "Version": "0.6.3",
+  "Author": "LiyueDev",
+  "Description": "在软件内和本地大模型对话（Qwen3-4B，不用联网、不用装 Ollama）",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": [
+    "ai",
+    "chat",
+    "llm",
+    "问答",
+    "对话",
+    "聊天",
+    "模型",
+    "qwen",
+    "本地ai",
+    "bdai",
+    "wdai"
+  ],
+  "Permissions": [
+    "clipboard",
+    "config"
+  ],
+  "Data": [
+    "llm_chat"
+  ],
+  "Config": {
+    "ctx": 8192,
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "auto_start": true,
+    "idle_release": 300
+  }
+}

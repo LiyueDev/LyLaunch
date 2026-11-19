@@ -1,0 +1,22 @@
+[project]
+name = "lylaunch"
+version = "0.43.0"
+description = "一个热键唤起的极简 Windows 启动器：搜应用、翻剪贴板、开插件，纯本地不上传"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = { text = "Apache-2.0" }
+authors = [{ name = "LiyueDev" }]
+keywords = ["launcher", "windows", "pyside6", "hotkey", "clipboard", "productivity"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Environment :: Win32 (MS Windows)",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Desktop Environment :: Window Managers",
+]
+
+# 运行依赖统一维护在 requirements.txt，避免两处清单不同步。
+# 本项目按源码运行（python main.py），无需 pip install 本包。

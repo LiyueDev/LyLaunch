@@ -1,0 +1,30 @@
+{
+  "Id": "clipboard_history",
+  "Name": "剪贴板历史",
+  "Version": "0.1.0",
+  "Author": "LiyueDev",
+  "Description": "记录你复制过的文字，按时间倒序排列：双击或回车就能重新复制，支持搜索、单条删除和清空。数据只存在本机（%LocalAppData%\\LyLaunch），不联网。",
+  "Icon": "",
+  "Main": "main.py",
+  "EntryClass": "Plugin",
+  "Keywords": [
+    "剪贴板",
+    "剪切板",
+    "复制",
+    "历史",
+    "clipboard",
+    "jiantieban",
+    "fuzhi",
+    "paste"
+  ],
+  "Permissions": [
+    "clipboard",
+    "config"
+  ],
+  "Hotkey": "",
+  "Config": {
+    "max_items": 100,
+    "poll_ms": 700,
+    "paused": false
+  }
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 372" width="400" height="372" role="img" aria-label="轻启 LyLaunch">
+  <title>轻启 LyLaunch — 竖版锁定组合</title>
+  <g transform="translate(72,-26)">
+    <path d="M70 54 Q80 36 92 46 Q102 56 94 90 Q84 132 82 160 Q80 182 96 182 Q114 182 124 160 Q134 138 136 114 Q142 144 154 166 Q164 180 176 162 Q184 148 184 134 Q186 170 174 200 Q164 220 138 212"
+          fill="none" stroke="#2F6BEE" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="200" y="302" text-anchor="middle" font-family="Noto Sans SC, Source Han Sans SC, Microsoft YaHei, PingFang SC, sans-serif" font-size="96" font-weight="700" fill="#17181C" letter-spacing="3">轻启</text>
+  <text x="200" y="352" text-anchor="middle" font-family="Inter, Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="36" font-weight="500" fill="#9AA1AB" letter-spacing="3">LyLaunch</text>
+</svg>
