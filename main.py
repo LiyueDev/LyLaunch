@@ -33,7 +33,7 @@ class _SafeQApplication(QApplication):
             import datetime
             import traceback
             try:
-                from liytools import paths
+                from lylaunch import paths
                 paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
                 with open(paths.DATA_DIR / "crash.log", "a", encoding="utf-8") as f:
                     f.write("\n==== event/slot exception ")
@@ -46,9 +46,9 @@ class _SafeQApplication(QApplication):
             traceback.print_exc()
             return True
 
-from liytools import single_instance, tray, paths
-from liytools.icons import get_icon
-from liytools.ui.main_window import MainWindow
+from lylaunch import single_instance, tray, paths
+from lylaunch.icons import get_icon
+from lylaunch.ui.main_window import MainWindow
 
 
 def _dbg_print(*args, **kwargs):
@@ -62,7 +62,7 @@ def _install_excepthook() -> None:
 
     作用：双击(pythonw)无控制台运行时，异常不会"静默消失"——至少留痕可查。
     注意：Qt 在事件回调里逃逸的异常会先 abort 进程，本钩子捕获不到那一类；
-    插件执行异常由 manager.execute 的 BaseException 兜底捕获（见 liytools/plugins/manager.py）。
+    插件执行异常由 manager.execute 的 BaseException 兜底捕获（见 lylaunch/plugins/manager.py）。
     """
     import traceback
 
@@ -164,7 +164,7 @@ def main() -> int:
 
     # 全局推理引擎（llama.cpp Router）：懒启动（此处只构造，不 spawn）；
     # 退出时统一收口，保证 router + 所有模型 child 被清理（含右键退出/异常退出）。
-    from liytools.engine import EngineManager
+    from lylaunch.engine import EngineManager
     _engine_mgr = EngineManager.instance()
     app.aboutToQuit.connect(_engine_mgr.shutdown)
 

@@ -4,7 +4,7 @@
 全局热键唤出；剪贴板历史；真实图标后台加载；键盘操作（↑↓←→/Tab/Enter/Esc）；
 右键固定/打开文件位置；右键窗口空白处可退出。
 
-所有 Win32 相关（热键/图标）都封装在 liytools 各模块，本文件只做 UI 与编排。
+所有 Win32 相关（热键/图标）都封装在 lylaunch 各模块，本文件只做 UI 与编排。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from PySide6.QtGui import (QImage, QPixmap, QCursor, QAction, QPainter, QPainter
                          QLinearGradient, QPen, QDrag)
 from PySide6.QtSvg import QSvgRenderer
 
-from liytools.plugins.plugin_icons import (
+from lylaunch.plugins.plugin_icons import (
     PLUGIN_ICON_BG, PLUGIN_ICON_FG, render_plugin_svg, system_icon_svg, action_icon_svg,
 )
 from PySide6.QtWidgets import (
@@ -2409,7 +2409,7 @@ class MainWindow(QWidget):
             pass
         # 双保险：显式停掉 Router（aboutToQuit 也会调，shutdown 幂等）
         try:
-            from liytools.engine import EngineManager
+            from lylaunch.engine import EngineManager
             EngineManager.instance().shutdown()
         except Exception:
             pass

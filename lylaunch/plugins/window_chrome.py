@@ -2,7 +2,7 @@
 
 用法（构造期，show() 之前）：
 
-    from liytools.plugins.window_chrome import install_chrome
+    from lylaunch.plugins.window_chrome import install_chrome
     install_chrome(self, "文本翻译", icon="translator")
     install_chrome(self, "本地 AI 对话", icon="llm_chat",
                    show_minmax=True, resizable=True)
@@ -206,11 +206,11 @@ class ChromeTitleBar(QWidget):
         logo.setFixedSize(20, 20)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         try:
-            from liytools.tray import _make_default_icon
+            from lylaunch.tray import _make_default_icon
             logo.setPixmap(_make_default_icon(20).pixmap(20, 20))
         except Exception:
             try:
-                from liytools.plugins.plugin_icons import (
+                from lylaunch.plugins.plugin_icons import (
                     plugin_icon_svg, render_plugin_svg)
                 logo.setPixmap(render_plugin_svg(plugin_icon_svg(icon_name), 18))
             except Exception:

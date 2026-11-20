@@ -33,9 +33,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from liytools.plugins.base import PluginBase
-from liytools.plugins import theme
-from liytools.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
+from lylaunch.plugins.base import PluginBase
+from lylaunch.plugins import theme
+from lylaunch.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
 
 import doc_engine as eng
 import md_render
@@ -91,7 +91,7 @@ def _schedule_release(engine: eng.Engine, seconds: int) -> None:
 # ── 可选识别模型面板 ──────────────────────────────────────────────
 # 刻意做成主窗口内的普通 QFrame 子控件，不用 Qt.Popup 顶层窗口：
 # Windows 下 Popup 会带系统标题栏、不继承样式，之前还出过黑边和按钮点不动。
-# 0.36：私有 QSS 的色值全部收敛到定稿色板（与 liytools/plugins/theme.py 同步），
+# 0.36：私有 QSS 的色值全部收敛到定稿色板（与 lylaunch/plugins/theme.py 同步），
 # 主色 #2F6BEE / 次要 #5F6570 / 主文字 #161C28 / 描边 #D8E3F5 / 悬停 #E4EDFC。
 _PANEL_QSS = """
 QFrame#modelPanel { background:#FFFFFF; border:1px solid #D8E3F5; border-radius:10px; }
@@ -362,7 +362,7 @@ class QueueItem:
     在入队时就已经填好了，只有图片页要等模型识别。
 
     ⚠️ 这里**故意不用 @dataclass**：插件入口是被
-    `liytools/plugins/manager.py` 用 `spec_from_file_location` + `exec_module`
+    `lylaunch/plugins/manager.py` 用 `spec_from_file_location` + `exec_module`
     加载的，**没有注册进 sys.modules**；而 Python 3.14 的 dataclasses 解析字段
     类型时会去查 `sys.modules[cls.__module__].__dict__`，拿到 None 直接抛
     `AttributeError: 'NoneType' object has no attribute '__dict__'`，
@@ -778,7 +778,7 @@ class DocDialog(QDialog):
 
         self._build_ui()
         self.setStyleSheet(theme.DIALOG_QSS)
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
         install_chrome(self, "文档识别", show_minmax=True, resizable=True)
         _cancel_release()
         if self._cfg("auto_start", True):
@@ -1846,7 +1846,7 @@ class Plugin(PluginBase):
     def on_unload(self) -> None:
         # 0.39.1：不再杀整个 Router（可能其他插件正在用），只卸载本插件的 OCR 模型
         try:
-            from liytools.engine import EngineManager
+            from lylaunch.engine import EngineManager
             mgr = EngineManager.instance()
             ocr_ids = {m.id for m in eng.MODELS}
             for one in mgr.loaded_ids():

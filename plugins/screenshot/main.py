@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QSlider, QMenu,
 )
 
-from liytools.plugins.base import PluginBase
+from lylaunch.plugins.base import PluginBase
 
 
 def _dbg_print(*args, **kwargs):
@@ -52,7 +52,7 @@ TOOL_ELLIPSE = "ellipse"  # 椭圆
 TOOL_PEN = "pen"          # 画笔
 TOOL_TEXT = "text"        # 文字
 
-# 0.36 定稿色板（与 liytools/plugins/theme.py 同步）：浮层是浅色内容，
+# 0.36 定稿色板（与 lylaunch/plugins/theme.py 同步）：浮层是浅色内容，
 # 但标注色是功能色，仍保留醒目红；UI 主色统一 #2F6BEE。
 MARK_COLOR = QColor("#D93A2F")  # 标注主色（--danger）
 ACCENT = QColor("#2F6BEE")      # 选中/悬停主色（--accent）

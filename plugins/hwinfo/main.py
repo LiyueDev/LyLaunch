@@ -28,9 +28,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from liytools.plugins.base import PluginBase
-from liytools.plugins import theme
-from liytools.plugins.plugin_icons import generic_icon_svg, render_plugin_svg
+from lylaunch.plugins.base import PluginBase
+from lylaunch.plugins import theme
+from lylaunch.plugins.plugin_icons import generic_icon_svg, render_plugin_svg
 
 # 模块级单例：持有引用防 GC，重复打开只提到前台（第十章头号红线，禁止 dlg.exec()）。
 _DLG = None
@@ -897,7 +897,7 @@ class HwDialog(QDialog):
         root.setContentsMargins(24, 18, 24, 16)
         root.setSpacing(14)
         # 外壳必须在 root 布局建好之后装（否则拿不到 layout，会走保守回退）
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
         install_chrome(self, "硬件信息", show_minmax=True, resizable=True)
 
         # 头部：标题 + 右上「查看详情」
@@ -1056,7 +1056,7 @@ class DetailDialog(QDialog):
         root.setContentsMargins(24, 18, 24, 16)
         root.setSpacing(14)
         # 外壳必须在 root 布局建好之后装（否则拿不到 layout，会走保守回退）
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
         install_chrome(self, "硬件详情", show_minmax=True, resizable=True)
         title = QLabel("硬件详情")
         title.setProperty("role", "title")

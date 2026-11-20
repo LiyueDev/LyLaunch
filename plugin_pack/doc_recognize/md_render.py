@@ -1,4 +1,4 @@
-"""转发：真身在 ``liytools/doc_core/md_render.py``（主程序共享层）。
+"""转发：真身在 ``lylaunch/doc_core/md_render.py``（主程序共享层）。
 
 **不要在这里写实现**。
 
@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from liytools.doc_core.md_render import (  # noqa: F401
+from lylaunch.doc_core.md_render import (  # noqa: F401
     _WIDGET_CSS,
     clean,
     latex_to_text,

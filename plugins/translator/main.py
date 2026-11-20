@@ -58,9 +58,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QEvent, QEventLoop, QThread, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 
-from liytools.plugins.base import PluginBase
-from liytools.plugins import theme
-from liytools.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
+from lylaunch.plugins.base import PluginBase
+from lylaunch.plugins import theme
+from lylaunch.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
 
 import model_engine   # 本地大模型翻译引擎（Hy-MT2 via llama.cpp）— 同目录模块，插件加载时已加入 sys.path
 
@@ -200,7 +200,7 @@ def writable_models_dir() -> str:
 
     打包后程序目录通常在 C:\\Program Files 下（无写权限），且 onefile 的 sys._MEIPASS 是
     每次启动都会变的临时目录——都不能当下载落点。所以固定用用户数据目录。
-    直接读环境变量而不 import liytools.paths，是为了守住「插件不碰主程序模块」的隔离原则。
+    直接读环境变量而不 import lylaunch.paths，是为了守住「插件不碰主程序模块」的隔离原则。
     """
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     return os.path.join(base, "LyLaunch", "translator_models")
@@ -1053,7 +1053,7 @@ class TranslateDialog(QDialog):
         if self._backend_fallback:
             self._set_status("原选的本地模型还没下载 · 当前用离线翻译（右上角可切回并下载）")
         self.setStyleSheet(theme.DIALOG_QSS)
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
         install_chrome(self, "文本翻译", show_minmax=True, resizable=True)
 
         # 空闲释放离线引擎：定时器必须在主线程建（后台线程建的不会触发）

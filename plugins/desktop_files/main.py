@@ -43,8 +43,8 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem, QVBoxLayout, QWidget,
 )
 
-from liytools.plugins import theme
-from liytools.plugins.base import PluginBase
+from lylaunch.plugins import theme
+from lylaunch.plugins.base import PluginBase
 
 # 插件目录已被 manager 插入 sys.path；单独跑本文件时补一次
 try:
@@ -444,7 +444,7 @@ class DesktopFilesDialog(QDialog):
         root.setContentsMargins(24, 18, 24, 16)
         root.setSpacing(12)
         # 外壳必须在 root 布局建好之后装（否则拿不到 layout 会静默回退系统栏）
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
 
         install_chrome(self, "桌面净化", show_minmax=True, resizable=True)
 
@@ -1137,7 +1137,7 @@ def _make_hotkey_setter(ctx):
     def _set(spec: str):
         import json
         from PySide6.QtWidgets import QApplication
-        from liytools.hotkey import parse_hotkey
+        from lylaunch.hotkey import parse_hotkey
         if parse_hotkey(spec) is None:
             return False, "无效的按键组合（至少带一个 Ctrl / Alt / Shift / Win）"
         path = os.path.join(ctx.plugin_dir, "plugin.json")

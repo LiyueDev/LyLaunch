@@ -1,6 +1,6 @@
 r"""图片转文字插件的「模型识别」引擎 —— 薄适配层（Router 版）。
 
-真正的实现在 ``liytools/doc_core/doc_engine.py``（主程序共享层），
+真正的实现在 ``lylaunch/doc_core/doc_engine.py``（主程序共享层），
 0.39.1 起它不再自己起 llama-server，而是统一走全局 Router（18090）。
 
 这里保留插件用惯的接口形状，尽量少改插件代码：
@@ -14,8 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from liytools.doc_core import doc_engine as _dc
-from liytools.doc_core.text_out import md_to_text  # noqa: F401  （对外保持原名）
+from lylaunch.doc_core import doc_engine as _dc
+from lylaunch.doc_core.text_out import md_to_text  # noqa: F401  （对外保持原名）
 
 # 端口与「文档识别」共用：同一个 Router 实例。
 PORT = _dc.DEFAULT_PORT
@@ -150,7 +150,7 @@ def release(model_id: str | None = None) -> None:
     双模型可同时驻留（--models-max 2），所以按模型粒度逐个判断，不看 loaded_id()。
     """
     try:
-        from liytools.engine import EngineManager
+        from lylaunch.engine import EngineManager
         mgr = EngineManager.instance()
         ocr_ids = {m.id for m in _dc.MODELS}
         target = spec_of(model_id).id if model_id else None

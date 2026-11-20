@@ -48,9 +48,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QApplication
 
-from liytools.plugins.base import PluginBase
-from liytools.plugins import theme
-from liytools.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
+from lylaunch.plugins.base import PluginBase
+from lylaunch.plugins import theme
+from lylaunch.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
 
 
 def _dbg_print(*args, **kwargs):
@@ -94,7 +94,7 @@ def _shot_hotkey_text() -> str:
     每次开窗口读一次配置文件即可 —— 设置页改完立刻落盘，重开插件就是新值。
     """
     try:
-        from liytools import config
+        from lylaunch import config
         return config.load_screenshot_hotkey().display or "Alt+A"
     except Exception:
         return "Alt+A"
@@ -404,7 +404,7 @@ class OcrDialog(QDialog):
         self.setAcceptDrops(True)
         self._build_ui()
         self.setStyleSheet(theme.DIALOG_QSS)
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
         install_chrome(self, "图片转文字", show_minmax=True, resizable=True)
 
         # 空闲释放引擎的定时器必须在主线程建（后台线程建的不会触发）

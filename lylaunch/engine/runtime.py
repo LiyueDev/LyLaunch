@@ -1,6 +1,6 @@
 """全局引擎的 Windows 底层工具：Job Object、pid、内存、端口健康、本地 HTTP 开销。
 
-从 liytools/doc_core/doc_engine.py 抽取（原三份重复实现的合并）。
+从 lylaunch/doc_core/doc_engine.py 抽取（原三份重复实现的合并）。
 只做 OS 层操作，不涉及业务逻辑。
 """
 from __future__ import annotations

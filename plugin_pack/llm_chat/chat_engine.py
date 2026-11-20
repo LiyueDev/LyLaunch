@@ -10,10 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
-from liytools.engine import downloads as _dl
-from liytools.engine import registry as _reg
-from liytools.engine.client import EngineError, ModelNotInstalled  # noqa: F401
-from liytools.engine.manager import EngineManager
+from lylaunch.engine import downloads as _dl
+from lylaunch.engine import registry as _reg
+from lylaunch.engine.client import EngineError, ModelNotInstalled  # noqa: F401
+from lylaunch.engine.manager import EngineManager
 
 DEFAULT_PORT = 18090          # 全局 Router 端口（旧 18082 已废弃）
 CTX_DEFAULT = 8192

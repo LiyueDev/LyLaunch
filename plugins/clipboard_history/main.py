@@ -33,9 +33,9 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QMenu, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
-from liytools.plugins import theme
-from liytools.plugins.base import PluginBase
-from liytools.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
+from lylaunch.plugins import theme
+from lylaunch.plugins.base import PluginBase
+from lylaunch.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
 
 # 非模态单例（第十章红线：禁止 dlg.exec()，重复打开只提到前台）
 _DLG = None
@@ -257,7 +257,7 @@ class ClipboardDialog(QDialog):
         # 必须先 setStyleSheet 再 install_chrome：install_chrome 会往现有样式串
         # 追加外壳 QSS，反过来（后 setStyleSheet）会把外壳规则整个覆盖掉。
         self.setStyleSheet(theme.DIALOG_QSS)
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
         install_chrome(self, "剪贴板历史", show_minmax=True, resizable=True)
 
         self._build_header(root)

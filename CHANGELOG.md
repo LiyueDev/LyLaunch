@@ -163,7 +163,7 @@
 - 启停按钮统一成文本翻译插件的胶囊规格（启动=蓝色实心，停止=浅蓝底 + hover 变红）；未启动时的「运行」字样统一为「模型」。
 - 文本翻译窗口放大到 740×640，语言选择行四个控件统一 34px；硬件信息与硬件详情默认高度增大并恢复可缩放。
 - 默认截图热键 **Ctrl+Alt+S → Alt+A**（已有本机配置不迁移）；本地 AI 示例语句与欢迎页文案按定稿更新。
-- 版本号三处同步 0.4；构建脚本 显式收录 `liytools.plugins.window_chrome`（插件懒加载，静态分析扫不到）。
+- 版本号三处同步 0.4；构建脚本 显式收录 `lylaunch.plugins.window_chrome`（插件懒加载，静态分析扫不到）。
 
 ---
 
@@ -275,7 +275,7 @@
 - 修复卸载第 2 页偶发的 `Access violation` 报错弹窗，以及检查日志和进度刷不出来的问题。
 - 修复卸载向导里「全选后仍显示将保留内容」「选项勾不上」「文字竖排 / 被裁切」等一连串界面问题。
 - 修复系统应用搜索结果图标、全局热键、消息框样式、截图残影四处问题（框架迁移后的连带修复）。
-- 修复正式包里可选插件「文档识别」（以及内置「图片转文字」的模型识别）打不开：打包时漏收只被插件动态引用的 `liytools.doc_core`，已在 构建脚本 显式补 `hiddenimports` + `datas` 并重出安装包（01:51，133.3 MB）。
+- 修复正式包里可选插件「文档识别」（以及内置「图片转文字」的模型识别）打不开：打包时漏收只被插件动态引用的 `lylaunch.doc_core`，已在 构建脚本 显式补 `hiddenimports` + `datas` 并重出安装包（01:51，133.3 MB）。
 - 修复文本翻译的自动方向判断：英文段落里夹一两个汉字，不再被整段误判成「中译英」而无法使用。
 - 修复本地 AI 只有一个已下载模型时无法卸载；卸载正在使用的模型会先停模型再删除，并自动切到其它可用模型。
 
@@ -333,7 +333,7 @@
 ### 变更
 
 - **引擎统一**：把 `doc_engine` / `inputs` / `md_render` / `md_to_text` 抽到主程序
-  共享层 `liytools/doc_core/`，「图片转文字」与「文档识别」共用**同一个
+  共享层 `lylaunch/doc_core/`，「图片转文字」与「文档识别」共用**同一个
   llama-server 实例**（同端口 18081、同数据目录）。0.35 之前两个插件同时用会起
   两个进程、各占约 1GB；现在只占一份，切换模型也只是换权重。
 - 「图片转文字」插件 0.4.0 → **0.5.0**；「文档识别」0.1.0 → 0.1.1（内部重构）。
@@ -349,7 +349,7 @@
   控件在事件循环回来前仍会绘制 —— 同帧重绘（搜索框边打边过滤 / 剪贴板刷新）时
   旧图标会叠在新瓦片上。改成 `hide() + deleteLater()`，二次刷新实测无残影。
   顺手清掉 `QScrollArea` 连续两次 `setStyleSheet()` 里那次被覆盖的无效调用。
-- **托盘兜底图标还是旧项目的字母 "M"**：`liytools/tray.py` 的 `_make_default_icon()` 在
+- **托盘兜底图标还是旧项目的字母 "M"**：`lylaunch/tray.py` 的 `_make_default_icon()` 在
   `assets/tray.ico` 读不到时会画一个白底蓝色 "M"（C# 时代 MyLauncher 的遗留），
   任务栏会突然冒出跟产品无关的图标。改成按 `brand/appicon.svg` 的路径自绘**白底蓝色
   连笔 Ly**（同样零外部依赖），文件头 docstring 与优先级注释一并更新。
@@ -626,7 +626,7 @@
 **发版时按顺序做这五件事：**
 
 1. **改版本号（三处，缺一处就会不一致）**
-   - `liytools/config.py` → `VERSION`
+   - `lylaunch/config.py` → `VERSION`
    - `version_info.txt` → `filevers` / `prodvers` 元组 + `FileVersion` / `ProductVersion` 字符串
    - 安装脚本 → `AppVersion` / `AppVerName` / `OutputBaseFilename`
 2. **在本文件顶部「版本速查」表加一行**，然后在速查表下面插入新的一节（倒序）。
@@ -668,7 +668,7 @@
 ```bash
 # 每个提交当时的版本号 + 日期 + 说明
 for c in $(git rev-list --reverse HEAD); do
-  v=$(git show $c:liytools/config.py | grep -m1 '^VERSION' | sed 's/.*"\(.*\)".*/\1/')
+  v=$(git show $c:lylaunch/config.py | grep -m1 '^VERSION' | sed 's/.*"\(.*\)".*/\1/')
   echo "$v|$(git log -1 --format='%ad' --date=short $c)|$(git log -1 --format='%s' $c)"
 done
 

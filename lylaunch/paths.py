@@ -69,7 +69,7 @@ for _legacy in _LEGACY_DATA_DIRS:
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ========== 全局推理引擎（llama.cpp Router）路径 ==========
-# 与 liytools/engine/registry.py 的 engine_dir()/models_dir() 指向同一处；
+# 与 lylaunch/engine/registry.py 的 engine_dir()/models_dir() 指向同一处；
 # 这里集中定义，供主程序 / 打包 / 卸载向导使用。
 ENGINE_DIR = DATA_DIR / "engine"
 ENGINE_MODELS_DIR = ENGINE_DIR / "models"
@@ -85,7 +85,7 @@ def resource_path(*parts: str) -> str:
 
     - 打包后（frozen）：优先取 sys._MEIPASS 下的资源（需用
       --add-data "assets;assets" 把资源打进 exe）。
-    - 开发期：取项目根目录（liytools 的上一级）。
+    - 开发期：取项目根目录（lylaunch 的上一级）。
     """
     import sys
     if getattr(sys, "frozen", False):

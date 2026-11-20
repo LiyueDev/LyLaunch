@@ -8,11 +8,11 @@
   - 用户插件：`%LocalAppData%/LyLaunch/plugins/`（软件内安装/卸载都发生在这）
 - 插件通过 `PluginBase` 基类接入，用 `PluginAPI` 调系统能力；
   `PluginManager` 负责扫描 / 加载 / 启用 / 禁用 / 卸载。
-- 所有配置集中在 `liytools/plugins/config.py`（模型）与
+- 所有配置集中在 `lylaunch/plugins/config.py`（模型）与
   `plugin_config.json` / `plugins_installed.json`（持久化），后续开发按这些配置走。
 
 对外入口：
-    from liytools.plugins import manager
+    from lylaunch.plugins import manager
     mgr = manager.PluginManager.instance()
 """
 

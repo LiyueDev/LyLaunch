@@ -176,7 +176,7 @@ class PluginManager:
             if info.directory not in sys.path:
                 sys.path.insert(0, info.directory)
             spec = importlib.util.spec_from_file_location(
-                f"liytools_plugin_{info.id}", main_path)
+                f"lylaunch_plugin_{info.id}", main_path)
             if spec is None or spec.loader is None:
                 info.error = "入口脚本解析失败"
                 return False
@@ -203,7 +203,7 @@ class PluginManager:
             info.loaded = False
             info.error = f"{type(e).__name__}: {e}"
             # 加载失败别把半成品模块留在 sys.modules 里
-            sys.modules.pop(f"liytools_plugin_{info.id}", None)
+            sys.modules.pop(f"lylaunch_plugin_{info.id}", None)
             return False
 
     def unload_plugin(self, info: PluginInfo) -> None:
@@ -377,7 +377,7 @@ class PluginManager:
             zf = zipfile.ZipFile(zip_path)
         except Exception:
             return False, "zip 文件无法打开"
-        tmp = Path(tempfile.mkdtemp(prefix="liytools_plugin_"))
+        tmp = Path(tempfile.mkdtemp(prefix="lylaunch_plugin_"))
         try:
             zf.extractall(tmp)
         except Exception as e:
@@ -534,7 +534,7 @@ def make_plugin_item(info: "PluginInfo") -> Item:
     插件搜索走 plugin_match_score()，那里会现算。
     """
     m = info.manifest
-    from liytools.plugins.plugin_icons import plugin_icon_svg  # 局部导入，避免任何包间循环
+    from lylaunch.plugins.plugin_icons import plugin_icon_svg  # 局部导入，避免任何包间循环
 
     return Item(
         name=m.name,

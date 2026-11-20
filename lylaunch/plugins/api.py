@@ -171,7 +171,7 @@ class PluginAPI:
     # 插件通过这几个方法查询/驱动统一 Router，而不是自己起 llama-server。
     @staticmethod
     def _engine():
-        from liytools.engine import EngineManager
+        from lylaunch.engine import EngineManager
         return EngineManager.instance()
 
     def engine_status(self) -> dict:
@@ -220,7 +220,7 @@ class PluginAPI:
 
     def engine_is_installed(self, model_id: str) -> bool:
         try:
-            from liytools.engine import is_installed, spec_of
+            from lylaunch.engine import is_installed, spec_of
             return is_installed(spec_of(model_id))
         except Exception:
             return False
@@ -228,7 +228,7 @@ class PluginAPI:
     def engine_specs(self) -> list:
         """全部模型规格（插件做模型列表用）。"""
         try:
-            from liytools.engine import MODELS
+            from lylaunch.engine import MODELS
             return list(MODELS)
         except Exception:
             return []
@@ -240,7 +240,7 @@ class PluginAPI:
         同一份文件有两个名字，只删 engine 那份会让 is_installed() 回退旧目录仍判"已装"。
         """
         try:
-            from liytools.engine import registry
+            from lylaunch.engine import registry
             ok, _msg = registry.remove_files(model_id)
             return ok
         except Exception:

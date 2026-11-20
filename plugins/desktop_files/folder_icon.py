@@ -65,7 +65,7 @@ def _refresh(folder: str) -> None:
 def _icon_dir() -> str:
     """ico 落盘目录：优先程序数据目录，取不到时退回 %LocalAppData%\\LyLaunch。"""
     try:
-        from liytools.paths import DATA_DIR
+        from lylaunch.paths import DATA_DIR
         return str(DATA_DIR / "icons")
     except Exception:
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
@@ -85,7 +85,7 @@ def make_tile_ico() -> tuple[bool, str]:
         return False, f"无法创建图标目录（{os.path.dirname(ico)}）：{exc}"
     try:
         from PySide6.QtWidgets import QApplication
-        from liytools.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
+        from lylaunch.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
         from PIL import Image, ImageDraw
 
         app = QApplication.instance()

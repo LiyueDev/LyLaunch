@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QVariantAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import QAbstractButton
 
-# 0.36 定稿色板（色 B 通透干净），与 liytools/plugins/theme.py 的 token 保持一致。
+# 0.36 定稿色板（色 B 通透干净），与 lylaunch/plugins/theme.py 的 token 保持一致。
 # 这里是逐帧 paintEvent 用的纯常量，不走 QSS，也不引入跨包 import 以免循环依赖。
 TRACK_ON = "#2F6BEE"       # --accent
 TRACK_HOVER_ON = "#2359D6" # --accent-hover

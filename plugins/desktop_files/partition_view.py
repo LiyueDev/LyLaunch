@@ -31,10 +31,10 @@ from PySide6.QtWidgets import (
     QSizePolicy, QStackedWidget, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
-from liytools.plugins import theme
+from lylaunch.plugins import theme
 
 try:
-    from liytools.icons import extract_icon_image
+    from lylaunch.icons import extract_icon_image
 except Exception:      # 插件独立分发时没有主程序模块，退回 Qt 图标
     extract_icon_image = None
 
@@ -730,7 +730,7 @@ class _HotkeyCaptureDialog(QDialog):
         if key in (Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Shift,
                    Qt.Key.Key_Meta, Qt.Key.Key_AltGr):
             return True
-        from liytools.hotkey import format_hotkey, parse_hotkey, vk_from_qt_key
+        from lylaunch.hotkey import format_hotkey, parse_hotkey, vk_from_qt_key
         mods = 0
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             mods |= 0x2      # MOD_CONTROL
@@ -808,7 +808,7 @@ QScrollArea { background: transparent; border: none; }
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 18, 24, 16)
         root.setSpacing(12)
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
 
         install_chrome(self, "桌面分区", show_minmax=True, resizable=True)
 

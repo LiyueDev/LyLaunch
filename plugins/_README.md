@@ -1,7 +1,7 @@
 # LyLaunch 插件系统 · 开发说明
 
 > **本文件 = 插件开发的权威约定文档（单一事实来源）。**
-> 新增 / 修改插件请以本文件为准，它与 `liytools/plugins/` 现有代码共同构成插件开发约定。
+> 新增 / 修改插件请以本文件为准，它与 `lylaunch/plugins/` 现有代码共同构成插件开发约定。
 > 插件系统与启动器基础功能（搜索/剪贴板/启动）**完全隔离**。
 > 本目录 `plugins/` 是**内置插件**源目录（随程序分发）；用户安装的插件在
 > `%LocalAppData%\LyLaunch\plugins\`。
@@ -45,7 +45,7 @@ plugins/<插件Id>/
 ## 三、代码怎么写（PluginBase 契约）
 
 ```python
-from liytools.plugins.base import PluginBase
+from lylaunch.plugins.base import PluginBase
 
 class Plugin(PluginBase):
     def on_load(self) -> None:
@@ -78,7 +78,7 @@ class Plugin(PluginBase):
 | `ctx.id` / `ctx.name` | 插件 Id / 显示名 |
 | `ctx.resource("icon.png", ...)` | 拼插件目录内资源文件的绝对路径 |
 
-### PluginAPI 完整能力表（`liytools/plugins/api.py`，插件能碰系统的**唯一边界**）
+### PluginAPI 完整能力表（`lylaunch/plugins/api.py`，插件能碰系统的**唯一边界**）
 
 > 每个方法都是幂等、容错的（失败返回默认值/False/静默），插件里不需要 try/except 兜底。
 > 新增系统能力 = 改 `api.py`（对所有插件生效）。
@@ -106,7 +106,7 @@ class Plugin(PluginBase):
 | `plugins_installed.json` | 已安装注册表：装了哪些、启没启用 | 管理器（装/卸载时） |
 | `plugins_<Id>.json` | 每个插件自己的配置（插件用 api 读写） | 插件自己 |
 
-`plugin_config.json` 完整字段见 `liytools/plugins/config.py` 的 `PluginSystemConfig`：
+`plugin_config.json` 完整字段见 `lylaunch/plugins/config.py` 的 `PluginSystemConfig`：
 - `Enabled` 插件系统总开关（False 完全不加载）
 - `AutoLoad` 启动时自动加载已启用插件
 - `AllowExternal` 是否允许安装外部插件
@@ -126,7 +126,7 @@ class Plugin(PluginBase):
 ## 六、下次怎么加插件（对接约定）
 
 - **怎么说**：新会话里直接讲插件需求即可，例如「给 LyLaunch 加个 XX 插件」「把 ocr 改成 XX」。助手接手流程：
-  先读本文件（权威约定）→ 看 `liytools/plugins/` 现有代码 → 按下面模板写。
+  先读本文件（权威约定）→ 看 `lylaunch/plugins/` 现有代码 → 按下面模板写。
 - **两种加插件方式**：
   1. **内置插件**（随程序分发，进版本库）：在仓库 `plugins/<Id>/` 下建目录 + 文件，提交即生效。
   2. **用户安装插件**（不进版本库）：打成 zip，在设置页「插件管理 → 安装」导入，落到 `%LocalAppData%\LyLaunch\plugins/`。
@@ -154,7 +154,7 @@ class Plugin(PluginBase):
 
 `plugins/<你的Id>/main.py`：
 ```python
-from liytools.plugins.base import PluginBase
+from lylaunch.plugins.base import PluginBase
 from PySide6.QtWidgets import QMessageBox
 
 class Plugin(PluginBase):
@@ -191,7 +191,7 @@ class Plugin(PluginBase):
 
 - 插件**只能**通过 `PluginAPI`（`ctx.api`）碰系统能力；**不得** `import` 主窗口 / 设置页 / 基础模块。
 - 主窗口**只**通过 `PluginManager` 拿插件数据（`get_plugin_items()` / `execute()`），**不直接** `import` 插件代码。
-- 加系统能力 = 改 `liytools/plugins/api.py`（对所有插件生效）；改插件契约 = 改 `liytools/plugins/config.py` 的 dataclass。
+- 加系统能力 = 改 `lylaunch/plugins/api.py`（对所有插件生效）；改插件契约 = 改 `lylaunch/plugins/config.py` 的 dataclass。
 - 上述边界是"与基础功能隔离"的核心约定，后续加插件时务必遵守。
 
 ## 十、插件 UI 开发经验（内置插件踩过的坑，新插件可照抄）
@@ -296,7 +296,7 @@ class Plugin(PluginBase):
 > 1. **插件入口里的类用普通类**（`__init__` + `@property`）——改插件即可立刻生效，
 >    不用等重打主包。`dataclass` 只能放在**被普通 import** 的模块里
 >    （如 `doc_engine.ModelSpec` 就没问题，因为 `import doc_engine` 会自动注册 sys.modules）。
-> 2. **主程序侧根治**：`liytools/plugins/manager.py` 加一行
+> 2. **主程序侧根治**：`lylaunch/plugins/manager.py` 加一行
 >    `sys.modules[spec.name] = module`（importlib 的标准做法），失败时
 >    `sys.modules.pop(...)` 清掉半成品。这条要重打主包才生效。
 >
@@ -307,7 +307,7 @@ class Plugin(PluginBase):
 > **判据**：插件"打不开"、插件管理页只显示一条 `AttributeError` 时，
 > 先怀疑**入口模块顶层的装饰器**，而不是插件自己的业务逻辑。
 
-1. **弹窗样式**：直接套统一主题——`from liytools.plugins import theme` 然后
+1. **弹窗样式**：直接套统一主题——`from lylaunch.plugins import theme` 然后
    `dialog.setStyleSheet(theme.DIALOG_QSS)`。主按钮设 `setProperty("role", "primary")`
    变蓝色（如「翻译/识别/保存」）；次按钮（设置/取消）不设即浅灰。文案提示用
    `setWordWrap(True)` 且给浅灰小字。

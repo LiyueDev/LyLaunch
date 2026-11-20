@@ -1,6 +1,6 @@
 """文档识别核心：模型规格 + 推理（0.39.1 起走全局 Router 引擎）。
 
-不再自己管理 llama-server 进程：所有推理通过 liytools.engine.EngineManager
+不再自己管理 llama-server 进程：所有推理通过 lylaunch.engine.EngineManager
 向统一 Router（127.0.0.1:18090）发请求。保留原有公共 API 形状
 （Engine / get_engine / spec_of / is_installed / remove_model / shared_data_dir …），
 让「图片转文字」「文档识别」两个插件改动最小。
@@ -13,9 +13,9 @@ import base64
 import time
 from pathlib import Path
 
-from liytools.engine import registry as _reg
-from liytools.engine.client import EngineError
-from liytools.engine.manager import EngineManager
+from lylaunch.engine import registry as _reg
+from lylaunch.engine.client import EngineError
+from lylaunch.engine.manager import EngineManager
 
 RUNTIME_TAG = "b12047"
 DEFAULT_PORT = 18090          # 全局 Router 端口（旧 18081 已废弃）
@@ -107,7 +107,7 @@ class Engine:
         cancelled 必须一路传到 HTTP 读循环，否则「取消下载」只是置了个标志，
         下载线程仍会跑完（0.39.1 修复）。
         """
-        from liytools.engine import downloads
+        from lylaunch.engine import downloads
         downloads.ensure_model_files(self.spec, progress, cancelled)
 
     def model_info(self) -> dict:
@@ -138,7 +138,7 @@ class Engine:
         所以「下载并启用」其实从没真正触发过下载。现在先 ensure_files 再起模型；
         用户取消时转成插件层一直在捕获的 Cancelled，不弹错误框。
         """
-        from liytools.engine.downloads import DownloadCancelled
+        from lylaunch.engine.downloads import DownloadCancelled
         try:
             self.ensure_files(progress, cancelled)
         except DownloadCancelled:

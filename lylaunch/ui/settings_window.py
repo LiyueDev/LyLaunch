@@ -25,7 +25,7 @@ from .switch import SwitchButton
 
 
 # ── 设置页定稿样式（原型 .card / .pill / .primary-btn / .hint / .mini-btn）──
-# 色值全部来自 liytools/plugins/theme.py（= 原型 data-scheme="air" 色板）
+# 色值全部来自 lylaunch/plugins/theme.py（= 原型 data-scheme="air" 色板）
 _TITLE_QSS = f"font-size:20px; font-weight:700; color:{_t.TEXT_PRIMARY};"
 _CARD_QSS = (f"QWidget#setCard {{background:{_t.BG_SURFACE}; border:1px solid {_t.BORDER};"
              f" border-radius:{_t.RADIUS_CARD}px;}}")

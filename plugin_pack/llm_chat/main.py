@@ -75,10 +75,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from liytools.plugins.base import PluginBase
+from lylaunch.plugins.base import PluginBase
 try:
     # 0.36 线性图标是后加的模块；旧版打包 exe 里可能没有，不能让插件因此打不开
-    from liytools.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
+    from lylaunch.plugins.plugin_icons import plugin_icon_svg, render_plugin_svg
 except Exception:      # noqa: BLE001
     plugin_icon_svg = None
     render_plugin_svg = None
@@ -3445,7 +3445,7 @@ class ChatDialog(QDialog):
         self.setStyleSheet(QSS)
         # 完全去掉系统标题栏：自绘导航栏 + 16px 圆角（所有插件窗口同一套外壳）。
         # 本地 AI 是普通应用窗口，要保留最小化/最大化/右下角缩放。
-        from liytools.plugins.window_chrome import install_chrome
+        from lylaunch.plugins.window_chrome import install_chrome
         install_chrome(self, "本地 AI 对话",
                        show_minmax=True, resizable=True,
                        solid=True, side_margin=8)
@@ -3714,7 +3714,7 @@ class ChatDialog(QDialog):
         # 正方形图等比缩放，不会变形。
         logo.setScaledContents(True)
         try:
-            from liytools.tray import _make_default_icon
+            from lylaunch.tray import _make_default_icon
             logo.setPixmap(_make_default_icon(160).pixmap(160, 160))
         except Exception:
             # 兜底：拿不到 logo 模块时退回原来的星标，别让欢迎页空一块

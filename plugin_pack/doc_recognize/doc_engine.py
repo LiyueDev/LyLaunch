@@ -1,4 +1,4 @@
-"""转发：真身在 ``liytools/doc_core/doc_engine.py``（主程序共享层）。
+"""转发：真身在 ``lylaunch/doc_core/doc_engine.py``（主程序共享层）。
 
 **不要在这里写实现。**
 
@@ -6,12 +6,12 @@
 可选插件里的模块，于是又复制了一份 805 行的副本，导致两套代码两个端口。
 0.36 把引擎上提到主程序后，这里只留转发，插件包结构保持不变（zip 里仍是 5 个文件）。
 
-改引擎请改 `liytools/doc_core/doc_engine.py`。
+改引擎请改 `lylaunch/doc_core/doc_engine.py`。
 """
 
 from __future__ import annotations
 
-from liytools.doc_core.doc_engine import (  # noqa: F401
+from lylaunch.doc_core.doc_engine import (  # noqa: F401
     DEFAULT_MODEL_ID,
     DEFAULT_PORT,
     MAX_SIDE_FOR_MODEL,

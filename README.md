@@ -86,7 +86,7 @@ xcopy /E /I /Y plugin_pack\llm_chat      "%LocalAppData%\LyLaunch\plugins\llm_ch
 
 ```
 main.py                  入口：单实例 → QApplication → 主窗口 + 托盘
-liytools/                核心库
+lylaunch/                核心库
 ├── ui/                  浮窗、设置页、开关控件
 ├── plugins/             插件框架（加载器 / API / 注册表 / 主题）
 ├── engine/              本地推理引擎（llama.cpp router 管理）

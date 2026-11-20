@@ -9,9 +9,9 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from liytools.engine import registry as _reg
-from liytools.engine.client import EngineError
-from liytools.engine.manager import EngineManager
+from lylaunch.engine import registry as _reg
+from lylaunch.engine.client import EngineError
+from lylaunch.engine.manager import EngineManager
 
 PORT = 18090                     # 全局 Router 端口（旧 18082/18083 已废弃）
 DEFAULT_MODEL_ID = "hy-mt2"
@@ -117,7 +117,7 @@ class Engine:
         就抛 ModelNotInstalled（"请先在对应插件的模型面板里下载"），于是点了几次
         都下不下来。这里补上真正的下载，并把取消统一成插件的 Cancelled。
         """
-        from liytools.engine import downloads
+        from lylaunch.engine import downloads
         try:
             downloads.ensure_model_files(_reg.spec_of(self._spec.id),
                                          progress, cancelled, paused, on_bytes)

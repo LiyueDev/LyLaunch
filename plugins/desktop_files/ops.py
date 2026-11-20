@@ -159,7 +159,7 @@ def collected_count(root: str) -> int:
 
 # ---------------------------------------------------------------- 插件数据 / 白名单
 def plugin_data_file() -> str:
-    from liytools import paths
+    from lylaunch import paths
 
     return paths.DATA_DIR / "plugins_desktop_files.json"
 
