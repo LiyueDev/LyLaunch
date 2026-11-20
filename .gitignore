@@ -37,11 +37,13 @@ ui-prototype/
 website/
 tools/
 
-# 构建产物（本项目交付源码，不入库）
+# 构建脚本与产物（仅本地打包使用，不入库）
 build/
 dist/
 dist_plugins/
 installer/
+installer.iss
+version_info.txt
 models/
 plugins/translator/models/
 runtime/

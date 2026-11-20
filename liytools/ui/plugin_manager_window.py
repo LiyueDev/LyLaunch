@@ -440,7 +440,7 @@ class InstallPanel(QFrame):
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         """点面板外面就收起（QFrame 子控件没有 Popup 的自动关闭）。
 
-        0.43：热键捕获分支已迁到 PluginManagerWindow —— 这里的 _on_edit_hotkey
+        热键捕获分支已迁到 PluginManagerWindow —— 这里的 _on_edit_hotkey
         等方法原先被错放进了 InstallPanel，而信号连的是 PluginManagerWindow，
         导致点「修改」即 AttributeError（插件页打不开）。
         """

@@ -13,7 +13,7 @@ from typing import Optional
 
 from . import paths
 
-VERSION = "0.43"  # LyLaunch 版本（独立计数，与 C# 版 0.1.32 无关）
+VERSION = "1.0"  # LyLaunch 版本号
 
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
