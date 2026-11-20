@@ -1,4 +1,4 @@
-"""0.36「图标·线性」：插件瓦片的 24×24 线性 SVG（Fluent / Lucide 风格，MIT / ISC，可商用）。
+"""插件瓦片的 24×24 线性 SVG 图标（自绘，不引第三方资源）。
 
 path 数据取自统一的图标路径定义 ICON_PATHS。
 渲染走 QSvgRenderer；着色直接把 stroke 写进 SVG 字符串（当前只有浅色面板，主色固定）。
@@ -36,7 +36,7 @@ _DEFAULT = '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/
 
 # ── 通用线性图标（0.36 11-11）：系统应用 / 粘贴动作复用插件那套视觉语言 ──
 # 和 _PATHS 同一规范：24×24 viewBox、fill=none、stroke-width 1.8、圆头圆角。
-# 图形为 Fluent / Lucide 风格的简笔路径，MIT / ISC 可商用，不引第三方资源。
+# 图形为自绘简笔路径，不引第三方资源。
 _GENERIC: dict[str, str] = {
     "terminal": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/>',
     "settings": '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.9 1.9M16.8 16.8l1.9 1.9M18.7 5.3l-1.9 1.9M7.2 16.8l-1.9 1.9"/>',
@@ -66,7 +66,7 @@ _GENERIC: dict[str, str] = {
     "locate": '<circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="2"/>',
     "alert": '<path d="M12 3l9 16H3z"/><path d="M12 9v5M12 17h.01"/>',
     # ── 硬件部件（0.39.1 hwinfo B 档）：概览每行左侧的线性图标 ──
-    # 同一规范：24×24 / fill=none / stroke-width 1.8 / 圆头圆角，Fluent·Lucide 风格自绘可商用。
+    # 统一规范：24×24 / fill=none / stroke-width 1.8 / 圆头圆角。
     "os": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M6.5 6.5h.01M9.5 6.5h.01"/>',
     "cpu": '<rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
     "gpu": '<rect x="2" y="6" width="15" height="12" rx="2"/><circle cx="8" cy="12" r="3"/><path d="M17 9h5v6h-5M13 10h2"/>',

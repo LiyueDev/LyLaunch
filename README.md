@@ -156,9 +156,9 @@ plugins/my_plugin/
 本项目采用 [Apache-2.0](LICENSE) 许可证开源，可自由使用、修改与分发。
 
 第三方组件按其各自许可证分发：PySide6（LGPLv3）、llama.cpp（MIT）、RapidOCR（Apache-2.0）、
-CTranslate2（MIT）；界面图标参考 Fluent / Lucide 风格（MIT / ISC）。详见下方「致谢」。
+CTranslate2（MIT），详见下方「致谢」。
 
-界面图标为自绘线性 SVG（Fluent / Lucide 风格参考，MIT / ISC 许可）。
+界面图标与品牌标识均为项目自绘的线性 SVG。
 
 ## 致谢
 
