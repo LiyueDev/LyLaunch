@@ -13,7 +13,7 @@ from typing import Optional
 
 from . import paths
 
-VERSION = "1.1.0"  # LyLaunch 版本号
+VERSION = "1.2.0"  # LyLaunch 版本号
 
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
@@ -214,3 +214,48 @@ def save_models_max(value: str) -> None:
     v = str(value).lower()
     save_engine_cfg({"models_max": v if v in ENGINE_MODELS_MAX_CHOICES
                      else DEFAULT_ENGINE_MODELS_MAX})
+
+
+# ---------- 首页瓦片手动顺序（应用 / 系统应用） ----------
+def load_tile_order(group: str) -> list[str]:
+    """某个首页区块被拖出来的顺序（存 path 列表）；没排过返回空表。"""
+    data = _read_json(paths.TILE_ORDER_FILE)
+    if not isinstance(data, dict):
+        return []
+    value = data.get(group)
+    return [str(x) for x in value] if isinstance(value, list) else []
+
+
+def save_tile_order(group: str, ordered_paths: list[str]) -> None:
+    """只覆盖传入的那个区块，另一区块的顺序原样保留。"""
+    data = _read_json(paths.TILE_ORDER_FILE)
+    if not isinstance(data, dict):
+        data = {}
+    data[group] = [str(p) for p in ordered_paths]
+    _write_json(paths.TILE_ORDER_FILE, data)
+
+
+# ---------- 窗口关闭行为（config.json） ----------
+# 老用户没有 config.json → 读默认 quit，行为与以前完全一致，不改变既有习惯。
+CLOSE_ACTIONS = ("quit", "tray")
+CLOSE_ACTION_LABELS = {"quit": "退出程序", "tray": "最小化到托盘"}
+DEFAULT_CLOSE_ACTION = "quit"
+
+
+def load_close_action() -> str:
+    """关闭主面板时的行为：quit=彻底退出 / tray=最小化到托盘。"""
+    data = _read_json(paths.CONFIG_FILE)
+    value = str((data or {}).get("CloseAction", DEFAULT_CLOSE_ACTION)).lower()
+    return value if value in CLOSE_ACTIONS else DEFAULT_CLOSE_ACTION
+
+
+def save_close_action(value: str) -> None:
+    v = str(value).lower()
+    if v not in CLOSE_ACTIONS:
+        return
+    data = _read_json(paths.CONFIG_FILE)
+    if not isinstance(data, dict):
+        data = {}
+    data["CloseAction"] = v
+    data.setdefault("Version", VERSION)
+    _write_json(paths.CONFIG_FILE, data)

@@ -217,9 +217,11 @@ def main() -> int:
         window.show_window()
 
     def exit_cb():
-        window.close()
+        # 走 quit_app 而不是 close()：closeEvent 在「最小化到托盘」模式下只隐藏
+        window.quit_app()
 
     tray_icon = tray.setup_tray(show_cb, exit_cb)
+    window._tray = tray_icon      # 设置页「关闭到托盘」与首提示要用到它
     _dbg_print("[LyLaunch] 托盘已设置。", flush=True)
 
     _dbg_print("[LyLaunch] 调用 show_window()…", flush=True)

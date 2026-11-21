@@ -22,7 +22,6 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (QImage, QPixmap, QCursor, QAction, QPainter, QPainterPath,
                          QColor, QFont, QFontMetrics, QRegion, QPolygon, QIcon,
                          QLinearGradient, QPen, QDrag)
-from PySide6.QtSvg import QSvgRenderer
 
 from lylaunch.plugins.plugin_icons import (
     PLUGIN_ICON_BG, PLUGIN_ICON_FG, render_plugin_svg, system_icon_svg, action_icon_svg,
@@ -1003,7 +1002,7 @@ class MainWindow(QWidget):
         elif payload.is_doc and not doc_ok:
             # 文档识别没装也有两条可用路径：本地 AI 零模型解析 / 直接打开。
             # 末尾说明瓦片（item_type="提示" 不可点）只标明它是可选增强，不再说"需安装"。
-            add("open_settings", "去 设置 → 插件管理", "⚙", "#7C5CFF")
+            add("open_settings", "去 设置 → 插件", "⚙", "#7C5CFF")
             if llm_ok:
                 add("llm_chat", "发给本地 AI", "AI", "#00B2A9")
             add("open", "打开", "开", "#22C55E")
@@ -1517,11 +1516,11 @@ class MainWindow(QWidget):
                 if self._plugin_available("llm_chat"):
                     self.empty_hint.setText(
                         "这类文件可直接选「发给本地 AI」（零模型解析）或「打开」；"
-                        "想要表格 / 公式 / 多页结构化 Markdown，再到 设置 → 插件管理 安装「文档识别」")
+                        "想要表格 / 公式 / 多页结构化 Markdown，再到 设置 → 插件 安装「文档识别」")
                 else:
                     self.empty_hint.setText(
                         "这类文件可直接「打开」或「定位」；想要结构化识别，"
-                        "请到 设置 → 插件管理 安装「文档识别」或「本地 AI」")
+                        "请到 设置 → 插件 安装「文档识别」或「本地 AI」")
             elif actions:
                 # 内容已在输入框里显示，这里只讲怎么操作。
                 if self._payload.is_image and self._plugin_available("doc_recognize"):
@@ -1583,8 +1582,10 @@ class MainWindow(QWidget):
                 items = self._build_home(self._expanded_group)
             else:
                 items = self._build_home()
-                # 首页态插件区块常驻
-                items.extend(self._sorted_plugin_items())
+                # 首页态插件区块常驻：**只铺一行**，多出来的靠「全部 >」看
+                plugins = self._sorted_plugin_items()
+                self._plugin_total = len(plugins)
+                items.extend(plugins[:self._PLUGIN_ROW_MAX])
             self.empty_hint.setVisible(False)
         self._render(items)
 
@@ -1638,7 +1639,8 @@ class MainWindow(QWidget):
             if p.name:
                 pinned_keys.add(p.name)
 
-        # ② 应用行：最近打开的优先，其余应用补齐；首页只取 8 个，「全部 >」取全部
+        # ② 应用行：默认最近打开的优先、其余补齐；再按用户拖出来的顺序重排，
+        #    最后才截断成一行（顺序要先排过再截，否则被拖到前面的应用会看不到）
         if want_apps:
             app_seen = set(pinned_keys)
             app_row: list[Item] = []
@@ -1653,20 +1655,18 @@ class MainWindow(QWidget):
                 app_seen.add(r.name)
                 app_row.append(self.search_index.make_app_item(
                     r.name, rpath, "应用", launch=r.launch, args=r.args))
-                if limit and len(app_row) >= limit:
-                    break
-            if limit is None or len(app_row) < limit:
-                for a in self.search_index.index:
-                    if a.path in app_seen or a.name in app_seen:
-                        continue
-                    app_seen.add(a.path)
-                    app_seen.add(a.name)
-                    app_row.append(self.search_index.make_app_item(a.name, a.path, "应用"))
-                    if limit and len(app_row) >= limit:
-                        break
+            for a in self.search_index.index:
+                if a.path in app_seen or a.name in app_seen:
+                    continue
+                app_seen.add(a.path)
+                app_seen.add(a.name)
+                app_row.append(self.search_index.make_app_item(a.name, a.path, "应用"))
+            app_row = self._apply_manual_order("应用", app_row)
+            if limit:
+                app_row = app_row[:limit]
             items.extend(app_row)
 
-        # ③ 系统应用行：最近打开的优先，其余补齐
+        # ③ 系统应用行：最近打开的优先，其余补齐（同样先排顺序再截断）
         if want_sys:
             sys_seen = set(pinned_keys)
             sys_row: list[Item] = []
@@ -1683,24 +1683,34 @@ class MainWindow(QWidget):
                     sa.name, sa.path, "系统应用", launch=sa.launch, args=sa.launch_args)
                 it.icon_svg = system_icon_svg(sa.name, sa.path)
                 sys_row.append(it)
-                if limit and len(sys_row) >= limit:
-                    break
-            if limit is None or len(sys_row) < limit:
-                for s in self.search_index.system_apps:
-                    if s.path in sys_seen:
-                        continue
-                    sys_seen.add(s.path)
-                    it = self.search_index.make_app_item(
-                        s.name, s.path, "系统应用", launch=s.launch, args=s.launch_args)
-                    it.icon_svg = system_icon_svg(s.name, s.path)
-                    sys_row.append(it)
-                    if limit and len(sys_row) >= limit:
-                        break
+            for s in self.search_index.system_apps:
+                if s.path in sys_seen:
+                    continue
+                sys_seen.add(s.path)
+                it = self.search_index.make_app_item(
+                    s.name, s.path, "系统应用", launch=s.launch, args=s.launch_args)
+                it.icon_svg = system_icon_svg(s.name, s.path)
+                sys_row.append(it)
+            sys_row = self._apply_manual_order("系统应用", sys_row)
+            if limit:
+                sys_row = sys_row[:limit]
             items.extend(sys_row)
 
         # 注意：首页态插件区块由 refresh_list() 统一追加，不在本方法里，
         # 以保证"剪贴板内容预填 + 插件始终可见"的体验。
         return items
+
+    def _apply_manual_order(self, group: str, row: list[Item]) -> list[Item]:
+        """按用户拖出来的顺序重排某个区块。
+
+        排过的条目按保存的顺序靠前；没排过的（新装的、新出现的）保持原有相对
+        顺序排在后面 —— sorted 是稳定排序，所以不会把"最近使用优先"整块打乱。
+        """
+        order = config.load_tile_order(group)
+        if not order:
+            return row
+        rank = {p.lower(): i for i, p in enumerate(order)}
+        return sorted(row, key=lambda it: rank.get((it.path or "").lower(), len(order)))
 
     def _toggle_group(self, label: str) -> None:
         """「全部 >」/「‹ 返回」：在该分类的完整网格与首页之间切换。"""
@@ -1757,14 +1767,23 @@ class MainWindow(QWidget):
             title = QLabel(label)
             title.setStyleSheet("font-size:13px; font-weight:600; color:#161C28;")
             hb.addWidget(title)
-            count = QLabel(str(len(group)))
+            # 数量用真实总数：插件首页只铺一行，写 8 会让人以为只有 8 个
+            shown_total = (max(len(group), getattr(self, "_plugin_total", 0))
+                           if label == "插件" else len(group))
+            count = QLabel(str(shown_total))
             count.setStyleSheet("font-size:12px; color:#5F6570;")
             hb.addWidget(count)
             hb.addStretch(1)
             # 「全部 >」：一行（最多 8 个）放得下就不给按钮 —— 空着也是空着。
             # 收藏应用也能展开（0.39.5 起：超过一行时才有按钮）。
             expanded = self._expanded_group == label
-            real_total = len(self.pinned) if label == "收藏应用" else len(group)
+            if label == "收藏应用":
+                real_total = len(self.pinned)
+            elif label == "插件":
+                # 首页只铺一行，len(group) 是被截断后的 8，真实总数在 refresh_list 里记着
+                real_total = max(len(group), getattr(self, "_plugin_total", 0))
+            else:
+                real_total = len(group)
             # 应用/系统应用首页按 8 截断，len(group)==8 说明"可能还有"，给按钮；
             # 收藏/插件拿到的是真实总数，超过 8 才给。
             has_more = (real_total > 8) or (
@@ -1784,7 +1803,7 @@ class MainWindow(QWidget):
                     " padding:3px 8px;}"
                     "QPushButton:hover{color:#2F6BEE; background:#E4EDFC;}")
                 all_btn.setToolTip(
-                    "回到首页" if expanded else f"查看全部「{label}」（共 {len(group)} 个）")
+                    "回到首页" if expanded else f"查看全部「{label}」（共 {real_total} 个）")
                 all_btn.clicked.connect(
                     lambda _c=False, g=label: self._toggle_group(g))
                 hb.addWidget(all_btn)
@@ -2120,9 +2139,12 @@ class MainWindow(QWidget):
             return
         super().mousePressEvent(event)
 
-    # ---------- 拖拽排序（收藏应用 / 插件） ----------
+    # ---------- 拖拽排序（收藏应用 / 插件 / 应用 / 系统应用） ----------
     _TILE_MIME = "application/x-lylaunch-tile"
-    _SORTABLE = ("收藏应用", "插件")
+    # 首页插件区块最多铺一行（列数上限也是 8），多的走「全部 >」
+    _PLUGIN_ROW_MAX = 8
+    # 可拖动的区块：顺序都存在本地（pinned.json / plugin_order.json / tile_order.json）
+    _SORTABLE = ("收藏应用", "插件", "应用", "系统应用")
 
     @staticmethod
     def _plugin_id_of(item: Item) -> str:
@@ -2142,13 +2164,13 @@ class MainWindow(QWidget):
     def _start_tile_drag(self, tile: TileWidget) -> None:
         """按住瓦片拖动 → 起内部拖拽，用来调整首页顺序。
 
-        只让收藏应用 / 插件可拖：这两块的顺序存在本地配置里（pinned.json /
-        plugin_order.json）。应用和系统应用是「最近打开优先」动态排的，
-        手动排下次打开就被打乱，所以直接不给拖。
+        可拖：收藏应用（pinned.json）、插件（plugin_order.json）、
+        应用 / 系统应用（tile_order.json）。搜索结果里的瓦片不给拖 ——
+        那块顺序是相关度算出来的，拖了也没意义。
         """
         grp = tile.item.group_label
         if grp not in self._SORTABLE:
-            self._show_toast("这个区块按最近使用自动排序，不支持拖动")
+            self._show_toast("搜索结果按匹配度排序，不支持拖动")
             return
         mime = QMimeData()
         mime.setData(self._TILE_MIME, f"{grp}\n{tile.item.path}".encode("utf-8"))
@@ -2291,6 +2313,18 @@ class MainWindow(QWidget):
             ids.remove(src_id)
             ids.insert(ids.index(dst_id) + (0 if before else 1), src_id)
             config.save_plugin_order(ids)
+        elif src_grp in ("应用", "系统应用"):
+            # 当前可见的瓦片就是用户看到的顺序；重排后整份保存成本区块的手动顺序。
+            # 首页只有一行时保存的是这 8 个，其余应用排在后面（换「全部 >」里还能再排）
+            keys = [t.item.path for t in self.tiles
+                    if t.item.group_label == src_grp and t.item.path]
+            src_key = next((k for k in keys if k.lower() == src_path.lower()), "")
+            dst_key = next((k for k in keys if k.lower() == dst_path.lower()), "")
+            if not src_key or not dst_key:
+                return
+            keys.remove(src_key)
+            keys.insert(keys.index(dst_key) + (0 if before else 1), src_key)
+            config.save_tile_order(src_grp, keys)
         else:
             return
         self.refresh_list()
@@ -2389,10 +2423,59 @@ class MainWindow(QWidget):
         super().changeEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        # 关闭按钮/Alt+F4：彻底退出（托盘"退出"也是走这里）
+        # 关闭按钮 / Alt+F4：默认彻底退出（托盘「退出」走 quit_app）。
+        # 设置里选了「最小化到托盘」时只隐藏窗口，进程与全局热键继续常驻。
+        if self._close_to_tray_enabled():
+            self.hide()
+            self._notify_tray_once()
+            event.ignore()
+            return
         self._purge_temp_files(force=True)   # 退出时全清本运行期落下的临时 PNG
         self._force_exit()
         event.accept()
+
+    def quit_app(self) -> None:
+        """真正退出程序（托盘菜单「退出」用）。
+
+        closeEvent 在「最小化到托盘」模式下只隐藏，托盘退出不能复用它，
+        否则会变成"点了退出却还在后台"。
+        """
+        self._purge_temp_files(force=True)
+        self._force_exit()
+
+    def _close_to_tray_enabled(self) -> bool:
+        """是否应把关闭动作降级成「隐藏到托盘」。
+
+        托盘不可用（远程会话 / 资源管理器未就绪）时一律回落到退出，
+        否则窗口藏起来之后就再也叫不回来了。
+        """
+        try:
+            if config.load_close_action() != "tray":
+                return False
+            from PySide6.QtWidgets import QSystemTrayIcon
+            if not QSystemTrayIcon.isSystemTrayAvailable():
+                return False
+            tray = getattr(self, "_tray", None)
+            return tray is not None and tray.isVisible()
+        except Exception:
+            return False
+
+    def _notify_tray_once(self) -> None:
+        """第一次隐藏到托盘时提示一句：否则用户会以为程序被关掉了。"""
+        if getattr(self, "_tray_hint_shown", False):
+            return
+        self._tray_hint_shown = True
+        try:
+            tray = getattr(self, "_tray", None)
+            if tray is not None:
+                from PySide6.QtWidgets import QSystemTrayIcon
+                tray.showMessage(
+                    "LyLaunch 还在后台运行",
+                    f"按 {getattr(self, '_hotkey_display', 'Alt+Space')} 可随时唤出，"
+                    "托盘右键「退出」才会结束进程。",
+                    QSystemTrayIcon.MessageIcon.Information, 4000)
+        except Exception:
+            pass
 
     def _force_exit(self) -> None:
         try:

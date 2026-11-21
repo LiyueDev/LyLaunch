@@ -12,9 +12,10 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
-from . import paths, config
+from . import paths
 from .item import Item
 from .pinyin import get_pinyin
 from .search_rank import rank_score
@@ -47,9 +48,15 @@ class SearchIndex:
         self.desktop_names: set[str] = set()   # 桌面快捷方式名集合（同名优先）
         self._search_cache: list[dict] = []    # 搜索候选缓存
         self._dirty = True
+        # 构建统计（设置页「搜索」分页展示用）：本次运行最后一次 build 的规模与耗时
+        self.last_count = 0
+        self.last_system_count = 0
+        self.last_ms = 0
+        self.last_at = 0.0
 
     # ---------- 构建索引 ----------
     def build(self) -> None:
+        t0 = time.monotonic()
         items: list[Item] = []
         for d in (paths.desktop(), paths.common_desktop()):
             self._collect_lnk(d, items)
@@ -75,6 +82,11 @@ class SearchIndex:
 
         self._build_system_apps()
         self._dirty = True
+
+        self.last_count = len(self.index)
+        self.last_system_count = len(self.system_apps)
+        self.last_ms = int(round((time.monotonic() - t0) * 1000))
+        self.last_at = time.time()
 
     def _collect_lnk(self, directory: str | None, target: list[Item],
                      _depth: int = 0, _visited: set[str] | None = None) -> None:

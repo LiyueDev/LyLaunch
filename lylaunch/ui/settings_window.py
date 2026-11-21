@@ -8,38 +8,59 @@ from __future__ import annotations
 import os
 
 from ctypes.wintypes import MSG
-from PySide6.QtCore import Qt, QAbstractNativeEventFilter, QCoreApplication, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtCore import (
+    Qt, QAbstractNativeEventFilter, QCoreApplication, QRect, QSize, Signal,
+    QPropertyAnimation, QEasingCurve, QPointF, QRectF,
+)
+from PySide6.QtGui import QKeyEvent, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QWidget,
-    QApplication,
+    QScrollArea, QStackedWidget, QButtonGroup, QWidget, QFrame,
+    QApplication, QGraphicsOpacityEffect,
 )
 
 from .. import autostart, build_info, config, hotkey, reset
 from ..config import MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
 from ..hotkey import format_hotkey
-from ..plugins.manager import PluginManager
 from ..plugins import theme as _t
+from .settings_common import RESET_BTN_TEXT, open_url
 from .switch import SwitchButton
 
 
-# ── 设置页定稿样式（原型 .card / .pill / .primary-btn / .hint / .mini-btn）──
-# 色值全部来自 lylaunch/plugins/theme.py（= 原型 data-scheme="air" 色板）
+# ── 设置页定稿样式（两栏：左导航 + 右分页）──
+# 主色仍取自 lylaunch/plugins/theme.py（= 原型 air 色板），
+# 但整体改为中性灰底 + 白卡，读起来更像「系统设置」而不是工具面板。
+_SIDE_BG = "#EEF2F8"      # 左导航底色（比内容区略沉一档）
+_PANE_BG = "#F6F8FB"      # 右内容区底色（白卡浮在上面才分得清层级）
+_LINE = "#E3E9F1"         # 卡片描边 / 行分割线
+_MUTED = "#7C8391"        # 行说明文字 / 次要信息的灰
 _TITLE_QSS = f"font-size:20px; font-weight:700; color:{_t.TEXT_PRIMARY};"
-_CARD_QSS = (f"QWidget#setCard {{background:{_t.BG_SURFACE}; border:1px solid {_t.BORDER};"
-             f" border-radius:{_t.RADIUS_CARD}px;}}")
+_CARD_QSS = (f"QWidget#setCard {{background:#FFFFFF; border:1px solid {_LINE};"
+             f" border-radius:12px;}}")
+_NAV_QSS = (f"QPushButton{{background:transparent; border:1px solid transparent;"
+            f" border-radius:8px; text-align:left; padding-left:9px;"
+            f" font-size:13px; color:{_t.TEXT_SECONDARY};}}"
+            f" QPushButton:hover{{background:#E9EEF7;}}"
+            f" QPushButton:checked{{background:#FFFFFF; border-color:{_LINE};"
+            f" color:{_t.ACCENT}; font-weight:600;}}")
+_LINK_QSS = (f"QPushButton{{background:transparent; border:none; padding:0 2px;"
+             f" font-size:12px; color:{_t.ACCENT};}}"
+             f" QPushButton:hover{{color:{_t.ACCENT_HOVER};}}")
 _PILL_QSS = (f"background:{_t.BG_SUBTLE}; border:1px solid {_t.BORDER};"
              f" border-radius:8px; padding:6px 12px; font-weight:600;"
              f" font-size:13px; color:{_t.TEXT_PRIMARY};")
 _PRIMARY_QSS = (f"QPushButton{{background:{_t.ACCENT}; color:#FFFFFF; border:none;"
                 f" border-radius:8px; font-size:12px;}}"
-                f" QPushButton:hover{{background:{_t.ACCENT_HOVER};}}")
-_GHOST_QSS = (f"QPushButton{{background:{_t.BG_SUBTLE}; border:1px solid {_t.BORDER};"
+                f" QPushButton:hover{{background:{_t.ACCENT_HOVER};}}"
+                f" QPushButton:disabled{{background:{_t.ACCENT_DISABLED};"
+                f" color:#FFFFFF;}}")
+_GHOST_QSS = (f"QPushButton{{background:#FFFFFF; border:1px solid {_t.BORDER_STRONG};"
               f" border-radius:8px; font-size:12px; color:{_t.TEXT_PRIMARY};}}"
-              f" QPushButton:hover{{background:{_t.BG_TILE_HOVER};}}"
-              f" QPushButton:disabled{{color:{_t.TEXT_SECONDARY};}}")
+              f" QPushButton:hover{{background:{_t.BG_SUBTLE};}}"
+              f" QPushButton:disabled{{color:{_t.TEXT_PLACEHOLDER};"
+              f" background:#F7F9FC; border-color:{_LINE};}}")
 _BODY_QSS = f"font-size:12px; color:{_t.TEXT_SECONDARY};"
+_SET_BTN_TEXT = "修改"
 # 危险按钮（开发工具里的「重置」）：浅红底 + 红字，和普通主按钮区分开
 _DANGER_QSS = (f"QPushButton{{background:{_t.DANGER_SOFT}; color:{_t.DANGER};"
                f" border:1px solid {_t.DANGER_BORDER}; border-radius:8px;"
@@ -60,6 +81,163 @@ def _size_text(n: int) -> str:
 def _hint(color: str | None = None) -> str:
     """底部小字：默认次要灰，状态色（成功/警告/危险）可覆盖。"""
     return f"font-size:11px; color:{color or _t.TEXT_SECONDARY};"
+
+
+def _tray_available() -> bool:
+    """系统托盘是否可用（远程会话 / 精简系统里可能没有）。"""
+    try:
+        from PySide6.QtWidgets import QSystemTrayIcon
+        return bool(QSystemTrayIcon.isSystemTrayAvailable())
+    except Exception:
+        return False
+
+
+def _nav_icon(kind: str, color: str) -> QIcon:
+    """导航项前面的 16px 线性图标（不依赖图标文件，直接画出来）。
+
+    统一 1.4px 线宽、圆头收尾、无填充块，与设置页里那套细描边保持一致；
+    按 2 倍分辨率绘制（32px 位图 + dpr 2），125% 缩放下不会糊。
+    """
+    pm = QPixmap(32, 32)
+    pm.fill(Qt.GlobalColor.transparent)
+    # 不用 setDevicePixelRatio：QPainter 在高 DPI 位图上会自己再乘一次缩放，
+    # 与下面的 scale(2) 叠起来会把字形放大 4 倍再裁掉右下半（实测踩过）。
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    p.scale(2.0, 2.0)                       # 之后都用 16×16 逻辑坐标
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.4)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    solid = QColor(color)
+
+    if kind == "general":                   # 三条滑块
+        for y, x in ((4.5, 6.0), (8.0, 10.5), (11.5, 4.0)):
+            p.drawLine(QPointF(2.5, y), QPointF(13.5, y))
+            p.setBrush(solid)
+            p.drawEllipse(QPointF(x, y), 1.5, 1.5)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+    elif kind == "hotkeys":                 # 键盘
+        p.drawRoundedRect(QRectF(1.6, 4.4, 12.8, 7.6), 2.0, 2.0)
+        p.setBrush(solid)
+        for i in range(4):
+            p.drawEllipse(QPointF(4.0 + i * 2.6, 7.4), 0.65, 0.65)
+        p.drawEllipse(QPointF(8.0, 9.9), 0.65, 0.65)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+    elif kind == "plugins":                 # 四格
+        for gx, gy in ((2.2, 2.2), (8.6, 2.2), (2.2, 8.6), (8.6, 8.6)):
+            p.drawRoundedRect(QRectF(gx, gy, 5.2, 5.2), 1.4, 1.4)
+    elif kind == "models":                  # 芯片：方框 + 四边引脚
+        p.drawRoundedRect(QRectF(4.6, 4.6, 6.8, 6.8), 1.6, 1.6)
+        p.drawRoundedRect(QRectF(6.9, 6.9, 2.2, 2.2), 0.8, 0.8)
+        for t in (6.0, 8.0, 10.0):
+            p.drawLine(QPointF(t, 2.4), QPointF(t, 4.6))
+            p.drawLine(QPointF(t, 11.4), QPointF(t, 13.6))
+            p.drawLine(QPointF(2.4, t), QPointF(4.6, t))
+            p.drawLine(QPointF(11.4, t), QPointF(13.6, t))
+    elif kind == "search":                  # 放大镜
+        p.drawEllipse(QPointF(7.0, 7.0), 4.6, 4.6)
+        p.drawLine(QPointF(10.4, 10.4), QPointF(13.6, 13.6))
+    elif kind == "data":                    # 圆柱（数据库）
+        p.drawEllipse(QRectF(2.6, 2.2, 10.8, 3.6))
+        p.drawLine(QPointF(2.6, 4.0), QPointF(2.6, 12.0))
+        p.drawLine(QPointF(13.4, 4.0), QPointF(13.4, 12.0))
+        p.drawArc(QRectF(2.6, 10.2, 10.8, 3.6), 180 * 16, 180 * 16)
+        p.drawArc(QRectF(2.6, 6.2, 10.8, 3.6), 180 * 16, 180 * 16)
+    elif kind == "about":                   # 圆环 + i
+        p.drawEllipse(QPointF(8.0, 8.0), 6.0, 6.0)
+        p.setBrush(solid)
+        p.drawEllipse(QPointF(8.0, 5.1), 0.75, 0.75)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawLine(QPointF(8.0, 7.4), QPointF(8.0, 11.2))
+    elif kind == "dev":                     # 尖括号 </>（代码）
+        p.drawLine(QPointF(6.0, 4.6), QPointF(2.4, 8.0))
+        p.drawLine(QPointF(2.4, 8.0), QPointF(6.0, 11.4))
+        p.drawLine(QPointF(10.0, 4.6), QPointF(13.6, 8.0))
+        p.drawLine(QPointF(13.6, 8.0), QPointF(10.0, 11.4))
+        p.drawLine(QPointF(9.2, 3.4), QPointF(6.8, 12.6))
+    p.end()
+    return QIcon(pm)
+
+
+class _HintLabel(QLabel):
+    """卡片里的小字提示：没有内容时不占高度。
+
+    QLabel 空文本也会留一行字高，设置页里 6 张卡各留一行空白，整页就虚胖；
+    这里让空状态的高度归零，setText 后再 updateGeometry 把高度要回来。
+    """
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setStyleSheet(_hint())
+        # 默认是垂直居中，高度差几像素时上下两行都会被裁；改成左上对齐
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+    def setText(self, text: str) -> None:  # noqa: N802 (Qt 命名)
+        super().setText(text)
+        # 提示是动态写进来的（自启状态、插件数量…），空→有内容时卡片要跟着长高，
+        # 否则文字会顶到卡片边框上。逐级通知父级重排最稳。
+        self._sync_min_height()
+        self.updateGeometry()
+        w = self.parentWidget()
+        while w is not None:
+            w.updateGeometry()
+            w = w.parentWidget()
+
+    def _empty(self) -> bool:
+        return not self.text().strip()
+
+    def _need_height(self, width: int) -> int:
+        """按当前宽度算这块字真正需要的高度。
+
+        QLabel 自己的行高在 125% 缩放下会少算（11px 字实际每行 ~18px），
+        这里按实测换行行数 × (行距 + 余量) 给足，宁可多留 4px 也不裁字。
+        """
+        if self._empty():
+            return 0
+        fm = self.fontMetrics()
+        rect = fm.boundingRect(QRect(0, 0, max(1, width), 100000),
+                              int(Qt.TextFlag.TextWordWrap), self.text())
+        lines = max(1, round(rect.height() / max(1, fm.height())))
+        # 关键点：125% 缩放时 QLabel 实际行高是「字体行距 × 屏幕缩放」，按逻辑行距算会少一截，
+        # 末行会被自己裁掉；这里按 DPR 补偿，再留 4px 余量。
+        dpr = self.devicePixelRatio() or 1.0
+        per_line = fm.lineSpacing() * dpr + 6
+        return int(round(lines * per_line + 3))
+
+    def sizeHint(self):  # noqa: N802
+        if self._empty():
+            return QSize(0, 0)
+        s = super().sizeHint()
+        return QSize(s.width(), max(s.height(), self._need_height(self.width() or 520)))
+
+    def heightForWidth(self, w: int) -> int:  # noqa: N802
+        if self._empty():
+            return 0
+        return max(super().heightForWidth(w), self._need_height(w))
+
+    def minimumSizeHint(self):  # noqa: N802
+        if self._empty():
+            return QSize(0, 0)
+        return QSize(super().minimumSizeHint().width(),
+                     self._need_height(self.width() or 520))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_min_height()
+
+    def _sync_min_height(self) -> None:
+        """宽度/文字变了行数就变：把高度下限锁到实测值，避免布局把末行挤掉。"""
+        need = self._need_height(self.width() or 520)
+        if self.minimumHeight() != need:
+            self.setMinimumHeight(need)
+
+    def set_color(self, color: str | None = None) -> None:
+        self.setStyleSheet(_hint(color))
 
 
 class _Segmented(QWidget):
@@ -160,7 +338,11 @@ class SettingsWindow(QDialog):
         self._main = main
         self._capturing_for = None  # None / "show" / "screenshot"，当前正在捕获哪个热键
         self.setWindowTitle("LyLaunch 设置")
-        self.setFixedSize(520, 580)
+        # 两栏版式：宽度固定够放下「标题 + 说明 + 控件」，高度按屏幕可用高度收
+        _scr = QApplication.primaryScreen()
+        _avail = _scr.availableGeometry().height() if _scr else 0
+        _h = 620 if not _avail else max(560, min(620, _avail - 100))
+        self.setFixedSize(900, _h)
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.WindowTitleHint
@@ -177,8 +359,6 @@ class SettingsWindow(QDialog):
         # 原生按键过滤器：Alt+空格 / F1-F12 / 符号键只有在这一层才拿得到（见 _NativeHotkeyCapture）
         self._native_filter = _NativeHotkeyCapture(self)
         QCoreApplication.instance().installNativeEventFilter(self._native_filter)
-        self._plugin_mgr = PluginManager.instance()  # 插件管理区读它
-        self._refresh_plugin_summary()
         self._load_autostart()
         self._refresh_models_max_hint()
         self._refresh_about()
@@ -191,6 +371,15 @@ class SettingsWindow(QDialog):
         self._capturing_for = None
         self._resume_main_hotkeys()
         self._remove_native_filter()
+        # 后台线程收尾：下载/卸载/目录统计还在跑时直接销毁窗口，信号会打到
+        # 已经析构的控件上。下载会被取消（.part 保留，下次续传）。
+        for attr in ("models_section", "data_section", "plugin_keys_section"):
+            sec = getattr(self, attr, None)
+            if sec is not None:
+                try:
+                    sec.stop()
+                except Exception:
+                    pass
         super().done(result)
 
     def _remove_native_filter(self) -> None:
@@ -211,174 +400,380 @@ class SettingsWindow(QDialog):
 
     # ---------- UI ----------
     def _setup_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 20)
-        root.setSpacing(12)
+        """两栏版式：左栏导航 + 右侧分页内容（行式卡片，参考系统设置的样子）。"""
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        title = QLabel("设置")
-        title.setStyleSheet(_TITLE_QSS)
-        root.addWidget(title)
+        # ── 左栏：导航 ──
+        side = QWidget()
+        side.setObjectName("setSide")
+        side.setFixedWidth(208)
+        side.setStyleSheet(
+            f"QWidget#setSide{{background:{_SIDE_BG}; border-right:1px solid {_LINE};}}")
+        sv = QVBoxLayout(side)
+        sv.setContentsMargins(12, 18, 12, 12)
+        sv.setSpacing(2)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea{border:none;}")
-        root.addWidget(scroll, stretch=1)
+        side_title = QLabel("设置")
+        side_title.setStyleSheet(
+            f"font-size:18px; font-weight:700; color:{_t.TEXT_PRIMARY}; padding:0 8px;")
+        sv.addWidget(side_title)
+        sv.addSpacing(10)
 
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(12)
-        scroll.setWidget(body)
+        self._stack = QStackedWidget()
+        self._nav_group = QButtonGroup(self)
+        self._nav_group.setExclusive(True)
+        self._pages: list[str] = []
+        self._nav_btns: list[QPushButton] = []
+        self._nav_icons: list[tuple[QIcon, QIcon]] = []   # (未选中灰, 选中蓝)
 
-        # 开机自启
-        box1 = self._card()
-        b1 = QHBoxLayout(box1)
-        left = QVBoxLayout()
-        left.addWidget(self._label("开机自动启动", bold=True))
-        left.addWidget(self._label("登录系统后自动运行 LyLaunch", size=12, color=_t.TEXT_SECONDARY))
-        self.autostart_hint = QLabel("")
-        self.autostart_hint.setStyleSheet(_hint())
-        self.autostart_hint.setWordWrap(True)
-        left.addWidget(self.autostart_hint)
-        b1.addLayout(left, stretch=1)
-        self.autostart = SwitchButton()  # 滑动开关：灰=关 / 蓝=开
-        self.autostart.toggled.connect(self._on_autostart)
-        b1.addWidget(self.autostart)
-        body_layout.addWidget(box1)
+        for key, text in self._nav_items():
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setFixedHeight(36)
+            btn.setStyleSheet(_NAV_QSS)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setIconSize(QSize(16, 16))
+            gray, accent = _nav_icon(key, _MUTED), _nav_icon(key, _t.ACCENT)
+            btn.setIcon(gray)
+            idx = len(self._pages)
+            self._nav_group.addButton(btn, idx)
+            btn.clicked.connect(lambda _=False, i=idx: self._go(i))
+            sv.addWidget(btn)
+            self._nav_btns.append(btn)
+            self._nav_icons.append((gray, accent))
+            self._pages.append(key)
+            if idx == 0:
+                btn.setChecked(True)
+                btn.setIcon(accent)
 
-        # 全局热键
-        box2 = self._card()
-        b2 = QVBoxLayout(box2)
-        b2.addWidget(self._label("全局唤起热键", bold=True))
-        b2.addWidget(self._label(
-            f"设置用哪个快捷键唤出 LyLaunch（默认 {config.DEFAULT_HOTKEY_DISPLAY}），更改后立即生效",
-            size=12, color=_t.TEXT_SECONDARY))
-        hk = QHBoxLayout()
-        self.hotkey_display = QLabel(config.DEFAULT_HOTKEY_DISPLAY)
-        self.hotkey_display.setStyleSheet(_PILL_QSS)
-        self.capture_btn = QPushButton("点击设置")
-        self.capture_btn.setFixedSize(88, 32)
-        self.capture_btn.setStyleSheet(_PRIMARY_QSS)
-        self.capture_btn.clicked.connect(lambda: self._on_capture("show"))
-        hk.addWidget(self.hotkey_display)
-        hk.addWidget(self.capture_btn)
-        hk.addStretch(1)
-        b2.addLayout(hk)
-        self.hotkey_hint = QLabel("")
-        self.hotkey_hint.setStyleSheet(_hint())
-        b2.addWidget(self.hotkey_hint)
-        body_layout.addWidget(box2)
+        sv.addStretch(1)
+        ver = QLabel(f"LyLaunch {config.VERSION}")
+        ver.setStyleSheet(f"font-size:11px; color:{_MUTED}; padding:0 8px;")
+        sv.addWidget(ver)
+        root.addWidget(side)
 
-        # 截图快捷键
-        box2b = self._card()
-        b2b = QVBoxLayout(box2b)
-        b2b.addWidget(self._label("截图快捷键", bold=True))
-        b2b.addWidget(self._label("按组合键直接进入截图（默认 Alt+A），更改后立即生效", size=12, color=_t.TEXT_SECONDARY))
-        hk2 = QHBoxLayout()
-        self.shot_hotkey_display = QLabel(getattr(self._main, "_shot_display", "Alt+A"))
-        self.shot_hotkey_display.setStyleSheet(_PILL_QSS)
-        self.shot_capture_btn = QPushButton("点击设置")
-        self.shot_capture_btn.setFixedSize(88, 32)
-        self.shot_capture_btn.setStyleSheet(_PRIMARY_QSS)
-        self.shot_capture_btn.clicked.connect(lambda: self._on_capture("screenshot"))
-        hk2.addWidget(self.shot_hotkey_display)
-        hk2.addWidget(self.shot_capture_btn)
-        hk2.addStretch(1)
-        b2b.addLayout(hk2)
-        self.shot_hotkey_hint = QLabel("")
-        self.shot_hotkey_hint.setStyleSheet(_hint())
-        b2b.addWidget(self.shot_hotkey_hint)
-        body_layout.addWidget(box2b)
+        # ── 右栏：内容 ──
+        pane = QWidget()
+        pane.setObjectName("setPane")
+        pane.setStyleSheet(f"QWidget#setPane{{background:{_PANE_BG};}}")
+        pv = QVBoxLayout(pane)
+        pv.setContentsMargins(26, 20, 26, 18)
+        pv.setSpacing(0)
+        pv.addWidget(self._stack, stretch=1)
+        root.addWidget(pane, stretch=1)
 
-        # 本地模型同时开几个（--models-max）
-        box2c = self._card()
-        b2c = QVBoxLayout(box2c)
-        b2c.addWidget(self._label("本地模型", bold=True))
-        b2c.addWidget(self._label(
-            "翻译、文档识别、本地 AI 共用一套引擎，这里选同时开几个",
-            size=12, color=_t.TEXT_SECONDARY))
-        seg_row = QHBoxLayout()
-        self.models_max_seg = _Segmented(
-            [("auto", "自动"), ("1", "1 个"), ("2", "2 个")],
-            config.load_models_max())
-        self.models_max_seg.changed.connect(self._on_models_max)
-        seg_row.addWidget(self.models_max_seg)
-        seg_row.addStretch(1)
-        b2c.addLayout(seg_row)
-        self.models_max_hint = QLabel("")
-        self.models_max_hint.setStyleSheet(_hint())
-        self.models_max_hint.setWordWrap(True)
-        b2c.addWidget(self.models_max_hint)
-        body_layout.addWidget(box2c)
+        # 各分页按导航顺序装配。
+        # 每页套一层透明滚动区：模型管理 / 数据统计的卡片会超过 620 的高度，
+        # 没滚动条就只能靠窗口长高，而窗口高度要按屏幕可用高度收。
+        for key in self._pages:
+            page = QWidget()
+            page.setStyleSheet("background:transparent;")
+            pv_page = QVBoxLayout(page)
+            pv_page.setContentsMargins(0, 0, 6, 0)
+            pv_page.setSpacing(14)
+            self._page(key, pv_page)
+            pv_page.addStretch(1)
 
-        # 插件管理（独立页面：设置里只留入口，列表/开关/安装在那个页面里）
-        box3b = self._card()
-        b3b = QVBoxLayout(box3b)
-        b3b.addWidget(self._label("插件管理", bold=True))
-        b3b.addWidget(self._label(
-            "启用 / 禁用 / 安装 / 卸载插件，在独立页面里操作",
-            size=12, color=_t.TEXT_SECONDARY))
-        self.plugin_summary = QLabel("")
-        self.plugin_summary.setStyleSheet(_hint())
-        b3b.addWidget(self.plugin_summary)
-        pb_row = QHBoxLayout()
-        self.open_plugins_btn = QPushButton("打开插件管理")
-        self.open_plugins_btn.setFixedHeight(32)
-        self.open_plugins_btn.setStyleSheet(_PRIMARY_QSS)
-        self.open_plugins_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.open_plugins_btn.clicked.connect(self._on_open_plugins)
-        pb_row.addWidget(self.open_plugins_btn)
-        pb_row.addStretch(1)
-        b3b.addLayout(pb_row)
-        body_layout.addWidget(box3b)
+            sa = QScrollArea()
+            sa.setWidget(page)
+            sa.setWidgetResizable(True)
+            sa.setFrameShape(QFrame.Shape.NoFrame)
+            sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            sa.setStyleSheet(
+                "QScrollArea{background:transparent; border:none;}"
+                " QScrollArea > QWidget > QWidget{background:transparent;}")
+            sa.viewport().setAutoFillBackground(False)
+            self._stack.addWidget(sa)
 
-        # 开发工具：重置全部数据（只在开发模式出现，打包版没有这个入口）
-        if reset.is_dev_mode():
-            box_d = self._card()
-            bd = QVBoxLayout(box_d)
-            bd.addWidget(self._label("开发工具 · 重置", bold=True))
-            bd.addWidget(self._label(
-                "删除本机全部 LyLaunch 数据：配置、插件、已下载模型、日志。"
-                "仅开发模式可见，打包版没有这个入口。",
-                size=12, color=_t.TEXT_SECONDARY))
-            d_row = QHBoxLayout()
-            self.reset_btn = QPushButton("重置所有配置和模型")
-            self.reset_btn.setFixedHeight(32)
-            self.reset_btn.setStyleSheet(_DANGER_QSS)
-            self.reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.reset_btn.clicked.connect(self._on_reset_all)
-            d_row.addWidget(self.reset_btn)
-            d_row.addStretch(1)
-            bd.addLayout(d_row)
-            self.reset_hint = QLabel("")
-            self.reset_hint.setStyleSheet(_hint())
-            self.reset_hint.setWordWrap(True)
-            self.reset_hint.setText(self._reset_usage_text())
-            bd.addWidget(self.reset_hint)
-            body_layout.addWidget(box_d)
+    def _nav_items(self) -> list[tuple[str, str]]:
+        """导航项顺序即分页顺序。"""
+        return [("general", "通用"), ("hotkeys", "快捷键"), ("plugins", "插件"),
+                ("models", "本地模型"), ("search", "搜索"), ("data", "数据与存储"),
+                ("about", "关于"), ("dev", "开发者")]
 
-        # 关于
-        box4 = self._card()
-        b4 = QVBoxLayout(box4)
-        b4.addWidget(self._label("关于", bold=True))
-        self.about = QLabel("")
-        self.about.setStyleSheet(_BODY_QSS)
-        self.about.setWordWrap(True)
-        b4.addWidget(self.about)
-        body_layout.addWidget(box4)
+    # ---------- 切页 ----------
+    def _go(self, idx: int) -> None:
+        """切到第 idx 页：同步图标高亮，再做一次短淡入。"""
+        w = self._stack.widget(idx)
+        if w is None:
+            return
+        changed = idx != self._stack.currentIndex()
+        self._stack.setCurrentIndex(idx)
+        for i, btn in enumerate(self._nav_btns):
+            btn.setIcon(self._nav_icons[i][1 if i == idx else 0])
+        if changed:
+            self._fade_in(w)
 
-        close_btn = QPushButton("关闭")
-        close_btn.setFixedSize(80, 32)
-        close_btn.setStyleSheet(_PRIMARY_QSS)
-        close_btn.clicked.connect(self.accept)
-        root.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+    def _fade_in(self, w: QWidget) -> None:
+        """120ms 透明度淡入；切页太快时先收掉上一次的动画，别让页面停在半透明。"""
+        prev = getattr(self, "_fade_anim", None)
+        if prev is not None:
+            try:
+                prev.stop()
+            except Exception:
+                pass
+            old = getattr(self, "_fade_widget", None)
+            if old is not None:
+                try:
+                    old.setGraphicsEffect(None)
+                except Exception:
+                    pass
+        eff = QGraphicsOpacityEffect(w)
+        w.setGraphicsEffect(eff)
+        anim = QPropertyAnimation(eff, b"opacity", self)
+        anim.setDuration(120)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda: w.setGraphicsEffect(None))
+        self._fade_anim = anim
+        self._fade_widget = w
+        anim.start()
 
-    # ---------- 小工具 ----------
+    def _page(self, key: str, lay: QVBoxLayout) -> None:
+        """按 key 装一页内容：页标题 + 若干「分组标签 + 行式卡片」。"""
+        if key == "general":
+            self._page_title(lay, "通用", "启动与基础偏好")
+            cv = self._group(lay, "启动")
+            self.autostart = SwitchButton()   # 滑动开关：灰=关 / 蓝=开
+            self.autostart.toggled.connect(self._on_autostart)
+            col = self._row(cv, "开机自动启动", "登录系统后自动运行 LyLaunch", self.autostart,
+                            wide_hint=True)
+            self.autostart_hint = self._hint_label(col, wide=True)
+
+            cv2 = self._group(lay, "窗口")
+            self.close_seg = _Segmented(
+                [(v, config.CLOSE_ACTION_LABELS[v]) for v in config.CLOSE_ACTIONS],
+                config.load_close_action())
+            self.close_seg.changed.connect(self._on_close_action)
+            col = self._row(cv2, "关闭窗口",
+                            "点标题栏的 X 或按 Alt+F4 时做什么",
+                            self.close_seg, wide_hint=True)
+            self.close_hint = self._hint_label(col, wide=True)
+            self._refresh_close_hint()
+
+        elif key == "hotkeys":
+            self._page_title(lay, "快捷键", "全局唤起与截图组合键")
+            cv = self._group(lay, "全局快捷键")
+            self.hotkey_display = QLabel(config.DEFAULT_HOTKEY_DISPLAY)
+            self.hotkey_display.setStyleSheet(_PILL_QSS)
+            self.capture_btn = QPushButton(_SET_BTN_TEXT)
+            self.capture_btn.setFixedSize(84, 30)
+            self.capture_btn.setStyleSheet(_GHOST_QSS)
+            self.capture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.capture_btn.clicked.connect(lambda: self._on_capture("show"))
+            col = self._row(cv, "唤起 LyLaunch",
+                            f"用哪个组合键唤出主窗口（默认 {config.DEFAULT_HOTKEY_DISPLAY}）",
+                            self._controls(self.hotkey_display, self.capture_btn))
+            self.hotkey_hint = self._hint_label(col)
+
+            col = self._row(cv, "截图",
+                            f"按下组合键直接进入截图（默认 {getattr(self._main, '_shot_display', 'Alt+A')}）",
+                            self._controls(
+                                self._pill(getattr(self._main, "_shot_display", "Alt+A")),
+                                self._ghost_button(_SET_BTN_TEXT, lambda: self._on_capture("screenshot"))),
+                            divider=True)
+            self.shot_hotkey_display = self._last_pill
+            self.shot_capture_btn = self._last_btn
+            self.shot_hotkey_hint = self._hint_label(col)
+
+            # 插件（如「桌面净化」）声明的全局快捷键也放这一页：
+            # 快捷键是"全局输入"，跟唤起 / 截图摆一起才找得到，插件列表里只留只读展示。
+            from .settings_hotkeys import build_plugin_keys
+            cv3 = self._group(lay, "插件快捷键")
+            self.plugin_keys_section = build_plugin_keys(self, cv3)
+
+        elif key == "plugins":
+            self._page_title(lay, "插件", "安装、启用与目录管理")
+            # 列表 / 包库 / 目录由独立模块装配，见 settings_plugins.py
+            # （原来是独立小窗口，一屏一卡；现在并进设置，改用分组行式白卡）
+            from .settings_plugins import build_plugins_page
+            build_plugins_page(self, lay)
+
+        elif key == "models":
+            self._page_title(lay, "本地模型", "并发设置与模型文件管理")
+            cv = self._group(lay, "运行")
+            self.models_max_seg = _Segmented(
+                [("auto", "自动"), ("1", "1 个"), ("2", "2 个")],
+                config.load_models_max())
+            self.models_max_seg.changed.connect(self._on_models_max)
+            col = self._row(cv, "同时运行模型数",
+                            "翻译、文档识别、本地 AI 共用一套引擎，这里选同时开几个",
+                            self.models_max_seg, wide_hint=True)
+            self.models_max_hint = self._hint_label(col, wide=True)
+            # 模型文件管理（汇总 / 已装 / 可下载）由独立模块装配，见 settings_models.py
+            from .settings_models import build_models_page
+            build_models_page(self, lay)
+
+        elif key == "search":
+            self._page_title(lay, "搜索", "索引范围与重建")
+            cv = self._group(lay, "索引")
+            col = self._row(cv, "索引范围",
+                            "桌面与开始菜单里的快捷方式，外加一组系统自带工具",
+                            None, wide_hint=True)
+            self.index_scope_hint = self._hint_label(col, wide=True)
+            self.index_scope_hint.setText(
+                "桌面 · 公共桌面 · 开始菜单 · 公共开始菜单 · 系统工具")
+            col = self._row(cv, "重建索引",
+                            "新装的软件搜不到？重建一次就好，不影响正在用的窗口",
+                            self._ghost_button("重建", self._on_rebuild_index),
+                            divider=True, wide_hint=True)
+            self.index_rebuild_btn = self._last_btn
+            self.index_hint = self._hint_label(col, wide=True)
+            self._refresh_index_hint()
+
+        elif key == "data":
+            self._page_title(lay, "数据与存储", "本机数据占用与清理")
+            from .settings_data import build_data_page
+            build_data_page(self, lay)
+
+        elif key == "about":
+            self._page_title(lay, "关于", "版本与署名")
+            cv = self._group(lay, "版本信息")
+            self.about = QLabel("")
+            self.about.setStyleSheet(f"font-size:12px; color:{_t.TEXT_SECONDARY};")
+            self.about.setWordWrap(True)
+            # 关于页只有一段文字，四周给足内边距，别贴着卡片边
+            cv.setContentsMargins(16, 14, 16, 14)
+            cv.addWidget(self.about)
+
+            # 链接：仓库与作者主页（点一下用默认浏览器打开，地址本身也留在行里方便复制）
+            cv3 = self._group(lay, "链接")
+
+            def _open(url: str, hint) -> None:
+                if open_url(url):
+                    hint.setText(f"已在浏览器打开 · {url}")
+                    hint.set_color(_t.SUCCESS)
+                else:
+                    hint.setText(f"没能调起浏览器，可以手动访问：{url}")
+                    hint.set_color(_t.DANGER)
+
+            # 提示标签要在行之后才能建（要 _row 的父布局），用 dict 先占个位给按钮闭包取用
+            box: dict = {}
+
+            def _open_repo() -> None:
+                _open(build_info.REPO_URL, box.get("repo"))
+
+            def _open_home() -> None:
+                _open(build_info.HOMEPAGE_URL, box.get("home"))
+
+            col = self._row(cv3, "GitHub 仓库", "源码、版本记录与问题反馈",
+                            self._link_button("打开仓库", _open_repo), wide_hint=True)
+            box["repo"] = self._hint_label(col, wide=True)
+            box["repo"].setText(build_info.REPO_URL)
+
+            col = self._row(cv3, "开发者主页", "LiyueDev 的主页，其它项目也在这里",
+                            self._link_button("打开主页", _open_home),
+                            divider=True, wide_hint=True)
+            box["home"] = self._hint_label(col, wide=True)
+            box["home"].setText(build_info.HOMEPAGE_URL)
+
+            # 诊断（日志 / 导出诊断包）已搬到「开发者」页，关于页只讲版本与署名
+
+        elif key == "dev":
+            self._page_title(lay, "开发者", "排障、诊断包与重置")
+            from .settings_dev import build_dev_page
+            build_dev_page(self, lay)
+
+    # ---------- 版式零件 ----------
+    def _page_title(self, lay: QVBoxLayout, text: str, sub: str = "") -> None:
+        head = QVBoxLayout()
+        head.setSpacing(3)
+        title = QLabel(text)
+        title.setStyleSheet(f"font-size:17px; font-weight:700; color:{_t.TEXT_PRIMARY};")
+        head.addWidget(title)
+        if sub:
+            d = QLabel(sub)
+            d.setStyleSheet(f"font-size:12px; color:{_MUTED};")
+            head.addWidget(d)
+        lay.addLayout(head)
+
+    def _group(self, lay: QVBoxLayout, label: str) -> QVBoxLayout:
+        """一组设置：小灰标题 + 白卡片，卡片里每行之间有细分割线。"""
+        wrap = QVBoxLayout()
+        wrap.setSpacing(7)
+        lab = QLabel(label)
+        lab.setStyleSheet(f"font-size:12px; color:#6E7683; padding-left:2px;")
+        wrap.addWidget(lab)
+        card = self._card()
+        wrap.addWidget(card)
+        lay.addLayout(wrap)
+        cv = self._card_body(card)
+        return cv
+
+    def _row(self, cv: QVBoxLayout, title: str, desc: str = "",
+             control: QWidget | None = None, divider: bool = False,
+             wide_hint: bool = False):
+        """卡片里的一行：左侧「标题 + 说明」，右侧控件。
+
+        返回挂提示用的布局：默认挂在左列（跟着行文走），
+        wide_hint=True 时挂在卡片整行下方（长路径 / 长说明不挤控件）。
+        """
+        if divider:
+            line = QWidget()
+            line.setFixedHeight(1)
+            line.setStyleSheet(f"background:{_LINE};")
+            cv.addWidget(line)
+        row = QWidget()
+        h = QHBoxLayout(row)
+        # 下面紧跟整行提示时，缩小行底内边距，别让提示飘得太远
+        h.setContentsMargins(2, 11, 2, 6 if wide_hint else 11)
+        h.setSpacing(14)
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        t = QLabel(title)
+        t.setStyleSheet(f"font-size:13px; font-weight:600; color:{_t.TEXT_PRIMARY};")
+        col.addWidget(t)
+        if desc:
+            d = QLabel(desc)
+            d.setStyleSheet(f"font-size:11px; color:{_MUTED};")
+            col.addWidget(d)
+        h.addLayout(col, 1)
+        if control is not None:
+            h.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
+        cv.addWidget(row)
+        return cv if wide_hint else col
+
+    def _pill(self, text: str) -> QLabel:
+        """键位胶囊（只读展示用）。"""
+        l = QLabel(text)
+        l.setStyleSheet(_PILL_QSS)
+        self._last_pill = l
+        return l
+
+    def _ghost_button(self, text: str, slot) -> QPushButton:
+        b = QPushButton(text)
+        b.setFixedSize(84, 30)
+        b.setStyleSheet(_GHOST_QSS)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.clicked.connect(lambda _=False: slot())
+        self._last_btn = b
+        return b
+
+    def _link_button(self, text: str, slot) -> QPushButton:
+        """行尾的文字按钮：蓝字 + 右箭头，像系统设置里的「›」入口。"""
+        b = QPushButton(f"{text}  ›")
+        b.setFixedHeight(28)
+        b.setStyleSheet(_LINK_QSS)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.clicked.connect(lambda _=False: slot())
+        self._last_btn = b
+        return b
+
+    def _card_body(self, card: QWidget) -> QVBoxLayout:
+        """卡片内文：左右 16px 内边距，行与行之间由 _row(divider=True) 画线。"""
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(16, 2, 16, 2)
+        cv.setSpacing(0)
+        return cv
+
     def _card(self) -> QWidget:
         w = QWidget()
         w.setObjectName("setCard")
         w.setStyleSheet(_CARD_QSS)
-        w.setContentsMargins(14, 12, 14, 12)
+        w.setContentsMargins(0, 0, 0, 0)
         return w
 
     def _label(self, text: str, bold: bool = False, size: int = 14,
@@ -387,6 +782,32 @@ class SettingsWindow(QDialog):
         l.setStyleSheet(f"font-size:{size}px; color:{color};" + ("font-weight:bold;" if bold else ""))
         l.setWordWrap(True)
         return l
+
+    def _hint_label(self, parent_layout: QVBoxLayout, text: str = "",
+                    wide: bool = False) -> _HintLabel:
+        l = _HintLabel(text)
+        if wide:
+            # 挂在卡片整行下方：用一层容器给底部内边距，
+            # 这样调用方后续改文字颜色（setStyleSheet）不会把边距一起冲掉。
+            box = QWidget()
+            bl = QVBoxLayout(box)
+            bl.setContentsMargins(2, 0, 0, 4)
+            bl.setSpacing(0)
+            bl.addWidget(l)
+            parent_layout.addWidget(box)
+        else:
+            parent_layout.addWidget(l)
+        return l
+
+    def _controls(self, *widgets: QWidget) -> QWidget:
+        """把几个控件并成一列（键位胶囊 + 按钮这种组合）。"""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        for item in widgets:
+            h.addWidget(item, 0, Qt.AlignmentFlag.AlignVCenter)
+        return w
 
     def _refresh_about(self) -> None:
         """「关于」页：版本号 + 定位 + 开发者署名。
@@ -445,7 +866,7 @@ class SettingsWindow(QDialog):
                             "程序现在退出，下次启动等于全新安装。")
             os._exit(0)          # 不做任何收尾：收尾会写回配置
         self.reset_btn.setEnabled(True)
-        self.reset_btn.setText("重置所有配置和模型")
+        self.reset_btn.setText(RESET_BTN_TEXT)
         self.reset_hint.setText(self._reset_usage_text())
         _t.show_warning(self, "部分内容没删掉",
                         "以下条目被占用或权限不足，关掉相关程序后可再点一次：\n\n"
@@ -515,6 +936,82 @@ class SettingsWindow(QDialog):
             self.models_max_hint.setText(
                 self.models_max_hint.text() + "\n引擎已重启，设置已生效。")
 
+    # ---------- 关闭窗口行为 ----------
+    def _refresh_close_hint(self) -> None:
+        if config.load_close_action() == "tray":
+            if _tray_available():
+                self.close_hint.setText(
+                    "关掉面板只是隐藏，进程与热键继续常驻；"
+                    "托盘右键「退出」才真正结束")
+                self.close_hint.set_color(None)
+            else:
+                self.close_hint.setText("当前系统没有托盘区，会按「退出程序」处理")
+                self.close_hint.set_color(_t.WARNING)
+        else:
+            self.close_hint.setText("退出后全局热键随之失效；想一直后台待命就选「最小化到托盘」")
+            self.close_hint.set_color(None)
+
+    def _on_close_action(self, value: str) -> None:
+        if value == "tray" and not _tray_available():
+            _t.show_warning(self, "系统托盘不可用",
+                            "当前环境没有系统托盘区，关到托盘后窗口就再也叫不回来了。\n\n"
+                            "已保持「退出程序」。")
+            self.close_seg.set_value(config.load_close_action())
+            return
+        config.save_close_action(value)
+        self._refresh_close_hint()
+
+    # ---------- 搜索索引 ----------
+    def _index_obj(self):
+        return getattr(self._main, "search_index", None)
+
+    def _refresh_index_hint(self) -> None:
+        idx = self._index_obj()
+        if idx is None:
+            self.index_hint.setText("当前环境拿不到索引（预览模式）")
+            self.index_hint.set_color(_t.WARNING)
+            btn = getattr(self, "index_rebuild_btn", None)
+            if btn is not None:
+                btn.setEnabled(False)
+            return
+        n = int(getattr(idx, "last_count", 0) or 0)
+        s = int(getattr(idx, "last_system_count", 0) or 0)
+        ms = int(getattr(idx, "last_ms", 0) or 0)
+        if n or s:
+            self.index_hint.setText(
+                f"本次运行已索引 {n} 个应用 + {s} 个系统工具 · 构建耗时 {ms} ms")
+        else:
+            self.index_hint.setText("尚未构建")
+        self.index_hint.set_color(None)
+
+    def _on_rebuild_index(self) -> None:
+        idx = self._index_obj()
+        if idx is None:
+            return
+        btn = self.index_rebuild_btn
+        btn.setEnabled(False)
+        btn.setText("重建中…")
+        self.index_hint.setText("正在扫描桌面与开始菜单…")
+        self.index_hint.set_color(None)
+        QApplication.processEvents()
+        try:
+            idx.build()
+        except Exception as exc:
+            btn.setEnabled(True)
+            btn.setText("重建")
+            self.index_hint.setText(f"重建失败：{exc}")
+            self.index_hint.set_color(_t.DANGER)
+            return
+        try:
+            self._main.refresh_list()   # 首页瓦片跟着换一批（不重建就还是旧列表）
+        except Exception:
+            pass
+        btn.setEnabled(True)
+        btn.setText("重建")
+        self._refresh_index_hint()
+        self.index_hint.setText("已重建 · " + self.index_hint.text())
+        self.index_hint.set_color(_t.SUCCESS)
+
     # ---------- 开机自启 ----------
     def _load_autostart(self) -> None:
         # blockSignals：仅初始化开关显示，避免 setChecked 触发 toggled 又去重写注册表
@@ -557,30 +1054,17 @@ class SettingsWindow(QDialog):
             self.autostart_hint.setText(f"设置开机自启失败：{e}")
             self.autostart_hint.setStyleSheet(_hint(_t.DANGER))
 
-    # ---------- 插件管理（这里只留入口，列表在独立页面）
-    def _refresh_plugin_summary(self) -> None:
-        """卡片上只报数量：具体列表/开关去独立页面看。"""
-        try:
-            plugins = self._plugin_mgr.all_plugins()
-        except Exception:
-            plugins = []
-        on = sum(1 for p in plugins if p.enabled)
-        self.plugin_summary.setText(
-            f"已安装 {len(plugins)} 个插件 · 已启用 {on} 个" if plugins
-            else "还没有安装插件")
-
+    # ---------- 插件管理（列表本体在 settings_plugins.py）
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        self._refresh_plugin_summary()
-
-    def _on_open_plugins(self) -> None:
-        """打开独立插件管理页；页面里改过插件就同步刷新首页与这里的数量。"""
-        from .plugin_manager_window import PluginManagerWindow
-        dlg = PluginManagerWindow(self)
-        dlg.plugins_changed.connect(self.plugins_changed.emit)
-        dlg.exec()
-        self._refresh_plugin_summary()
-        self.plugins_changed.emit()
+        # 每次打开都重读一次插件状态：插件可能在别处被启停 / 装掉过
+        for attr in ("plugins_section", "plugin_keys_section"):
+            sec = getattr(self, attr, None)
+            if sec is not None:
+                try:
+                    sec.refresh()
+                except Exception:
+                    pass
 
     # ---------- 热键捕获 ----------
     def capturing_target(self) -> str | None:
@@ -609,6 +1093,13 @@ class SettingsWindow(QDialog):
 
     def _on_capture(self, which: str) -> None:
         """进入/取消快捷键捕获。which: "show"(全局唤起) / "screenshot"(截图)。"""
+        # 插件快捷键那边正在捕获时先收掉：两种捕获不能同时抢键盘
+        keys = getattr(self, "plugin_keys_section", None)
+        if keys is not None:
+            try:
+                keys.cancel()
+            except Exception:
+                pass
         if self._capturing_for == which:          # 再点一次 = 取消
             self._cancel_capture()
             return
@@ -650,8 +1141,8 @@ class SettingsWindow(QDialog):
 
     def _restore_capture_ui(self) -> None:
         """把两个捕获按钮/提示恢复到未捕获状态（不动热键注册）。"""
-        self.capture_btn.setText("点击设置")
-        self.shot_capture_btn.setText("点击设置")
+        self.capture_btn.setText(_SET_BTN_TEXT)
+        self.shot_capture_btn.setText(_SET_BTN_TEXT)
         self.hotkey_hint.setText("")
         self.shot_hotkey_hint.setText("")
         self.hotkey_hint.setStyleSheet(_hint())
@@ -686,7 +1177,7 @@ class SettingsWindow(QDialog):
             ok, err = self._main.set_hotkey(mods, vk)
             if ok:
                 self._capturing_for = None
-                self.capture_btn.setText("点击设置")
+                self.capture_btn.setText(_SET_BTN_TEXT)
                 self.hotkey_display.setText(self._main._hotkey_display)
                 self._set_hint(hint, f"已保存：按 {self._main._hotkey_display} 即可唤出（无需重启）")
                 # 新组合已由 set_hotkey 注册好，这里只需把另一把（截图）补回来
@@ -700,7 +1191,7 @@ class SettingsWindow(QDialog):
             ok, err = self._main.set_screenshot_hotkey(mods, vk)
             if ok:
                 self._capturing_for = None
-                self.shot_capture_btn.setText("点击设置")
+                self.shot_capture_btn.setText(_SET_BTN_TEXT)
                 self.shot_hotkey_display.setText(self._main._shot_display)
                 self._set_hint(hint, f"已保存：按 {self._main._shot_display} 直接截图（无需重启）")
                 self._resume_main_hotkeys()

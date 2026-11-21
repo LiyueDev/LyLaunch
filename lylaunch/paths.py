@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -107,6 +106,8 @@ RECENTS_FILE = DATA_DIR / "recents.json"
 PINNED_FILE = DATA_DIR / "pinned.json"
 # 首页插件的自定义顺序（拖拽排序后写入的 id 列表；列表外的插件排在后面）
 PLUGIN_ORDER_FILE = DATA_DIR / "plugin_order.json"
+# 应用 / 系统应用瓦片的手动顺序（按区块名存 path 列表，拖拽后写入）
+TILE_ORDER_FILE = DATA_DIR / "tile_order.json"
 CONFIG_FILE = DATA_DIR / "config.json"   # 打包时记录版本等（可选）
 
 # ========== 插件系统相关路径（与基础功能隔离） ==========
