@@ -255,9 +255,9 @@ class Plugin(PluginBase):
 >    `ready` 后自动把排队的请求发出去（用户不该感知到引擎被停过）。
 >    ⚠️ 手动停止时拦截发送要**在消息入历史之前**，否则会出现「有气泡没回答」。
 >
-> 参考实现：`plugin_pack/llm_chat/main.py` 的 `_sync_power` / `_toggle_engine` /
+> 参考实现：`plugins/llm_chat/main.py` 的 `_sync_power` / `_toggle_engine` /
 > `_on_idle_stopped` / `_ensure_engine` / `_pending_images`；
-> `plugin_pack/doc_recognize/main.py` 的 `power_btn`（手动启停）；
+> `plugins/doc_recognize/main.py` 的 `power_btn`（手动启停）；
 > `plugins/translator/main.py` 的空闲释放缓存。
 > **判据**：窗口开着 N 分钟不用，后台进程还在占内存 → 就是 bug。
 

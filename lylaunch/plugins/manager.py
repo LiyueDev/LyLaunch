@@ -83,13 +83,17 @@ class PluginManager:
         """扫描全部插件目录，重建插件清单。任何目录异常都不影响其它目录。"""
         self._plugins.clear()
         roots: list[tuple[str, Path]] = []
-        if Path(paths.BUILTIN_PLUGINS_DIR).is_dir():
-            roots.append(("local", Path(paths.BUILTIN_PLUGINS_DIR)))
+        # 扫描顺序决定同 id 冲突时谁胜出（下面 self._plugins[info.id] = info 后者覆盖前者）。
+        # 内置(local)必须最后扫：随程序分发的插件是权威版本，用户数据目录里可能残留
+        # 旧版同名插件（如 1.0 之前手动装的 doc_recognize/llm_chat，内含已废弃的
+        # liytools 包名），若让 user 覆盖 local，内置的新版会被旧版遮蔽而加载失败。
         roots.append(("user", Path(paths.USER_PLUGINS_DIR)))
         for extra in self._cfg.scan_paths:
             p = Path(extra)
             if p.is_dir():
                 roots.append(("extra", p))
+        if Path(paths.BUILTIN_PLUGINS_DIR).is_dir():
+            roots.append(("local", Path(paths.BUILTIN_PLUGINS_DIR)))
 
         for source, root in roots:
             try:
@@ -272,6 +276,12 @@ class PluginManager:
         for pkg in pkgs:
             pid = str(pkg.get("id") or "")
             if not pid or pkg.get("installed") or pid in skip:
+                continue
+            # 已有内置同 id 插件时跳过：包库里可能残留旧版 zip（如 1.0 之前的
+            # doc_recognize/llm_chat，内含废弃的 liytools 包名），一旦装到用户目录
+            # 就会遮蔽内置新版。既然程序已随包分发该插件，就没有再装的必要。
+            current = self._plugins.get(pid)
+            if current is not None and current.source == "local":
                 continue
             try:
                 ok, _msg = self.install_from_zip(pkg["path"])

@@ -24,9 +24,8 @@ KIND_IMAGE = "image"
 KIND_FILES = "files"
 KIND_UNKNOWN = "unknown"
 
-# 与 plugins/ocr/main.py 的 IMG_EXTS、plugin_pack/doc_recognize/inputs.py 对齐。
-# 主程序侧自己维护一份：严禁 import 可选插件的源码（插件与基础功能隔离，
-# 且 doc_recognize / llm_chat 可能根本没安装）。
+# 与 plugins/ocr/main.py 的 IMG_EXTS、plugins/doc_recognize/inputs.py 对齐。
+# 主程序侧自己维护一份：严禁 import 插件源码（插件与基础功能隔离）。
 IMG_EXTS = frozenset({
     ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff", ".gif",
 })

@@ -1,6 +1,6 @@
 [project]
 name = "lylaunch"
-version = "1.0.0"
+version = "1.1.0"
 description = "一个热键唤起的极简 Windows 启动器：搜应用、翻剪贴板、开插件，纯本地不上传"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"

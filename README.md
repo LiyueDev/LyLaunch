@@ -56,20 +56,18 @@ python main.py
 - 首次运行会在 `%LocalAppData%\LyLaunch\` 建数据目录（配置、插件、日志都在这里）。
 - 离线翻译模型（约 140MB）不随仓库分发，首次使用对应插件时自动下载。
 
-### 可选插件（需手动安装）
+### 内置插件
 
-`plugin_pack/` 下的两个插件不随程序自动加载，需复制到用户插件目录后重启程序：
+8 个插件全部随程序分发、安装后自动启用，无需手动安装：
 
-```cmd
-xcopy /E /I /Y plugin_pack\doc_recognize "%LocalAppData%\LyLaunch\plugins\doc_recognize"
-xcopy /E /I /Y plugin_pack\llm_chat      "%LocalAppData%\LyLaunch\plugins\llm_chat"
-```
+剪贴板历史、桌面净化、文档识别、硬件信息、本地 AI、图片转文字、截图、文本翻译。
 
-### 本地 AI 对话的额外依赖
+### 本地 AI 对话的运行时
 
-`llm_chat` 插件依赖 `llama-server.exe`（约 137MB），本仓库不包含。请从
+`llm_chat`（本地 AI）与 `doc_recognize`（文档识别）依赖 llama.cpp 运行时。安装包已内置
+`llama-server.exe`；**源码运行**时才需要自行准备：从
 [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) 下载 Windows 版，
-把 `llama-server.exe` 放到 `%LocalAppData%\LyLaunch\engine\runtime\` 即可。
+把 `llama-server.exe` 放到仓库根目录的 `runtime/` 下。模型按需下载，不随包分发。
 
 ## 技术栈
 
@@ -96,8 +94,7 @@ lylaunch/                核心库
 ├── clipboard.py         剪贴板轮询
 ├── search_rank.py       相关度打分（应用与插件共用）
 └── paths.py             资源路径 / 数据目录
-plugins/                 内置插件（每个目录一个插件）
-plugin_pack/             可选插件的打包素材（按 zip 分发）
+plugins/                 内置插件（8 个，每个目录一个插件，随程序分发）
 ```
 
 ## 架构
