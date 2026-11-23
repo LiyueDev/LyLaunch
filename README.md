@@ -39,7 +39,13 @@ Python · PySide6 · Windows 原生 API · Apache-2.0
 
 ## 界面
 
-首屏那张是主浮窗的真实截图（1.2.2 实机，非示意图）。剩下几个视图——搜索结果、桌面净化、文档识别、设置页——见站点 <https://liyuedev.github.io>。
+<p align="center">
+  <img src="doc/screenshots/search.png" width="88%" alt="输入 wx，微信与微信开发者工具排在最前">
+</p>
+
+输入 `wx` 就出结果 —— 拼音首字母直接命中，不用切输入法，也不用记完整名字。
+
+两张都是实机截图，不是示意图。其余视图（桌面净化、文档识别、设置页）见站点 <https://liyuedev.github.io>。
 
 ## 快速开始
 
