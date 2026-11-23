@@ -23,6 +23,7 @@ from .. import autostart, build_info, config, hotkey, reset
 from ..config import MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
 from ..hotkey import format_hotkey
 from ..plugins import theme as _t
+from . import backdrop as _backdrop
 from .settings_common import RESET_BTN_TEXT, open_url
 from .switch import SwitchButton
 
@@ -554,6 +555,18 @@ class SettingsWindow(QDialog):
             self.close_hint = self._hint_label(col, wide=True)
             self._refresh_close_hint()
 
+            # 皮肤：原版（白→淡蓝渐变）与毛玻璃（跟随壁纸做 Acrylic 模糊）
+            cv3 = self._group(lay, "外观")
+            self.skin_seg = _Segmented(
+                [(v, config.WIN_SKIN_LABELS[v]) for v in config.WIN_SKINS],
+                config.load_win_skin())
+            self.skin_seg.changed.connect(self._on_skin)
+            col = self._row(cv3, "窗口皮肤",
+                            "原版是不透明的白蓝渐变；毛玻璃在原版渐变上做半透明 + 壁纸模糊",
+                            self.skin_seg, wide_hint=True)
+            self.skin_hint = self._hint_label(col, wide=True)
+            self._refresh_skin_hint()
+
         elif key == "hotkeys":
             self._page_title(lay, "快捷键", "全局唤起与截图组合键")
             cv = self._group(lay, "全局快捷键")
@@ -960,6 +973,31 @@ class SettingsWindow(QDialog):
             return
         config.save_close_action(value)
         self._refresh_close_hint()
+
+    # ---------- 皮肤 ----------
+    def _refresh_skin_hint(self) -> None:
+        skin = config.load_win_skin()
+        if skin != "glass":
+            self.skin_hint.setText("当前：原版（默认）。任何壁纸下都最稳")
+            self.skin_hint.set_color(None)
+            return
+        if not _backdrop.supported():
+            self.skin_hint.setText(
+                "毛玻璃需要在 Windows「设置 → 个性化 → 颜色」里打开「透明效果」；"
+                "现在没开，面板会退回原版渐变")
+            self.skin_hint.set_color(_t.WARNING)
+            return
+        self.skin_hint.setText(
+            "当前：毛玻璃。原版渐变 + 半透明，投影和边缘与原版一致；关掉设置即可看到")
+        self.skin_hint.set_color(None)
+
+    def _on_skin(self, value: str) -> None:
+        config.save_win_skin(value)
+        self.skin_seg.set_value(value)
+        main = self._main
+        if main is not None and hasattr(main, "apply_win_skin"):
+            main.apply_win_skin(value)
+        self._refresh_skin_hint()
 
     # ---------- 搜索索引 ----------
     def _index_obj(self):

@@ -43,6 +43,8 @@ from .. import single_instance
 from ..plugins.manager import PluginManager
 from ..plugins import theme as _t
 from .. import paste_payload as paste_mod
+from . import backdrop as _backdrop
+from . import skins as _skins
 
 
 def _dbg_print(*args, **kwargs):
@@ -133,15 +135,17 @@ class SettingsButton(QPushButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         t = self._t
-        # 背景：按下用 #D6E2F7 实底；否则按 hover 进度把 #E4EDFC 用 alpha 渐入。
+        tk = _skins.active()
+        # 背景：原版按下 #D6E2F7 实底 / hover #E4EDFC 渐入；
+        # 玻璃版走半透明白（gear_hover / gear_pressed），压在玻璃上才像同一层材质。
         # 圆角 10px 与搜索框一致，保持视觉统一。
         if self.isDown():
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor("#D6E2F7"))
+            p.setBrush(tk.gear_pressed)
             p.drawRoundedRect(self.rect(), 10, 10)
         elif t > 0.001:
-            bg = QColor("#E4EDFC")
-            bg.setAlphaF(t)
+            bg = QColor(tk.gear_hover)
+            bg.setAlphaF(bg.alphaF() * t)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(bg)
             p.drawRoundedRect(self.rect(), 10, 10)
@@ -165,6 +169,11 @@ class SettingsButton(QPushButton):
 WM_HOTKEY = 0x0312
 WM_ACTIVATE = 0x0006
 WA_INACTIVE = 0  # WM_ACTIVATE 的 wParam 低字：窗口被去激活（失焦）
+
+# Acrylic 的着色层（0-255）：纯模糊会把壁纸的暗部直接拖进来，面板看着发灰；
+# 加一层 58% 的白，壁纸只剩"柔和的冷暖倾向"，整体仍是白玻璃 —— 150 是实机
+# 扫参数（0 / 90 / 150 × 罩层 0.62 / 0.78）里最接近原版又不发灰的一档。
+_ACRYLIC_TINT = 150
 
 
 def _hash_color(name: str) -> str:
@@ -342,7 +351,8 @@ class TileWidget(QWidget):
         _nf = QFont()
         _nf.setPixelSize(12)
         self.name.setFont(_nf)
-        self.name.setStyleSheet("color:#161C28; background:transparent;")
+        self.name.setStyleSheet(
+            f"color:{_skins.active().text_primary}; background:transparent;")
         layout.addWidget(self.name, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.setMinimumWidth(76)
@@ -364,13 +374,17 @@ class TileWidget(QWidget):
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        # 瓦片背景：静态不绘制（透出页面整体色），悬停变暗、选中更深
+        tk = _skins.active()
+        glass = tk.name == "glass"
+        # 瓦片背景：原版静态不绘制（透出页面整体色），悬停变暗、选中更深；
+        # 玻璃版默认也不铺底（苹果的图标是"浮"在玻璃上的，一格格白方块又变回贴纸），
+        # 只在悬停/选中时给一层半透明白，选中再补一圈主色细环。
         if self.selected:
-            color = QColor("#E4EDFC")   # --bg-tile-hover（选中 = hover 底 + 主色描边）
+            color = tk.selected_bg
         elif self._hover:
-            color = QColor("#E4EDFC")
+            color = tk.hover_bg
         else:
-            color = None            # 默认背景与页面一致，无需绘制
+            color = tk.tile_bg
         if color is None and not self._drop_side:
             return
         p = QPainter(self)
@@ -379,7 +393,23 @@ class TileWidget(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(color)
             p.drawRoundedRect(self.rect(), 10, 10)
-            # 设计说明：选中不加描边——浅蓝底已足够，1px 蓝框在深色壁纸上太跳
+            if self.selected and tk.selected_ring is not None:
+                pen = QPen(tk.selected_ring)
+                pen.setWidthF(1.5)
+                p.setPen(pen)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 9.0, 9.0)
+            # 原版：选中不加描边——浅蓝底已足够，1px 蓝框在深色壁纸上太跳
+        if glass:
+            # 拖拽落点也用半透明，别在玻璃上突然出现一块实底
+            if self._drop_side:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(255, 255, 255, 90))
+                p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
+                p.setBrush(QColor("#007AFF"))
+                x = 1 if self._drop_side == "before" else self.width() - 4
+                p.drawRoundedRect(x, 8, 3, max(6, self.height() - 16), 1.5, 1.5)
+            return
         # 拖拽落点：淡底 + 左/右边缘一根 3px 主色竖条。
         # 只画竖条时目标瓦片毫无反应，看起来像"没接收到"；补一层底色成本很低。
         if self._drop_side:
@@ -396,7 +426,8 @@ class TileWidget(QWidget):
         # 也不再被 Windows 真实 exe 图标覆盖。11-11 起统一到同一套 UI 库。
         svg = getattr(self.item, "icon_svg", "")
         if svg:
-            self.icon.setStyleSheet(f"border-radius:10px; background:{PLUGIN_ICON_BG};")
+            bg = _skins.active().icon_bg or PLUGIN_ICON_BG
+            self.icon.setStyleSheet(f"border-radius:10px; background:{bg};")
             # 图标本体 22px（原型 ico(it.ico, 22)），不是把 40px 底整个填满
             self.icon.setPixmap(render_plugin_svg(svg, 22,
                                                   self.devicePixelRatioF() or 1.0))
@@ -410,6 +441,7 @@ class TileWidget(QWidget):
             # 取不到真实图标（失效快捷方式、脚本类目标等）：改用插件同款
             # 「浅底 + 主色首字」，不再用饱和色块 + 白大字 —— 那套在浅色面板上太扎眼。
             family = self.icon.font().family()
+            bg = _skins.active().icon_bg or PLUGIN_ICON_BG
             self.icon.setStyleSheet(
                 f"border-radius:10px; background:{PLUGIN_ICON_BG};"
                 f" color:{PLUGIN_ICON_FG}; font-family:'{family}';"
@@ -453,6 +485,45 @@ class TileWidget(QWidget):
     def leaveEvent(self, _e) -> None:
         self._hover = False
         self._refresh_styles()
+
+
+class _OuterShadow(QWidget):
+    """毛玻璃皮肤的独立投影层（原版投影参数原样搬过来）。
+
+    为什么不能让主窗口自己画：Acrylic 会把**整个窗口矩形**都糊上，只要窗口比
+    面板大一圈（为了放投影），那一圈就会变成实心磨砂边。于是玻璃窗口缩到面板大小、
+    投影交给这个伴生窗口：不接鼠标、不进任务栏、永远待在主窗下一层。
+    """
+
+    PAD = 19
+    RADIUS = 14
+    DY = 4
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.WindowTransparentForInput |
+            Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        inner = self.rect().adjusted(self.PAD, self.PAD, -self.PAD, -self.PAD)
+        sh = QPainterPath()
+        sh.addRoundedRect(inner.x(), inner.y() + self.DY,
+                          inner.width(), inner.height(), self.RADIUS, self.RADIUS)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        # 与主窗口原版投影同一套：层数 2*pad、平方衰减、偏蓝浅色
+        layers = 2 * self.PAD
+        for i in range(1, layers + 1):
+            t = 1 - i / layers
+            p.setPen(QPen(QColor(50, 80, 145, int(4 * t * t)), i))
+            p.drawPath(sh)
 
 
 class MainWindow(QWidget):
@@ -569,9 +640,19 @@ class MainWindow(QWidget):
     # ---------- 窗口初始化 ----------
     def _setup_window(self) -> None:
         self.setWindowTitle("LyLaunch")
-        # 0.36 设计说明：窗口比面板大一圈（四周留 _shadow_pad 给外部投影），
-        # 面板本身仍按原 860x520 绘制，投影溢出到留白区（显示在壁纸上），面板尺寸不变。
-        self._shadow_pad = 19
+        # 皮肤（2026-11-23）：solid=原来的白→淡蓝渐变，glass=系统 Acrylic 毛玻璃。
+        # 留白规则：原版要 19px 在窗口内画柔和投影；毛玻璃的投影交给伴生窗口
+        # _OuterShadow（Acrylic 会把整个窗口矩形都糊上，窗口内留白会变成一圈实心
+        # 磨砂边），所以主窗就是面板本身，pad=0。
+        self._skin = config.load_win_skin()
+        _skins.set_active(self._skin)
+        # 背景材质：show() 之后才尝试开 Acrylic（构造期碰 winId() 有崩溃史）。
+        # 系统不支持 / 关掉透明效果时保持 False，paintEvent 走原来的不透明渐变。
+        self._glass = False
+        self._glass_supported = _backdrop.supported()
+        # 毛玻璃的投影由独立伴生窗口画（_OuterShadow），主窗自己不画
+        self._shadow_win = None
+        self._shadow_pad = 0 if (self._skin == "glass" and self._glass_supported) else 19
         self.setFixedSize(860 + 2 * self._shadow_pad, 520 + 2 * self._shadow_pad)
         # 注意：
         # 1) 不要加 Qt.WindowType.Tool —— 与 Frameless 组合在 PySide6/Windows 上易崩。
@@ -658,6 +739,181 @@ class MainWindow(QWidget):
         """
         return
 
+    # ---------- 皮肤 ----------
+    def _relayout_for_pad(self) -> None:
+        """投影留白变了：窗口尺寸与内容边距一起重算（内容到面板边仍保持 16px）。"""
+        pad = self._shadow_pad
+        self.setFixedSize(860 + 2 * pad, 520 + 2 * pad)
+        layout = getattr(self, "_root_layout", None)
+        if layout is not None:
+            layout.setContentsMargins(16 + pad, 16 + pad, 16 + pad, 8 + pad)
+
+    def _sync_glass(self) -> None:
+        """让 Acrylic 状态跟当前皮肤一致；窗口不可见时不碰原生句柄。
+
+        毛玻璃时主窗收到面板大小（pad=0），投影由伴生窗口 `_OuterShadow` 画；
+        Acrylic 没开成（系统关了透明效果 / 显卡不支持）就退回"原版那套"：
+        19px 留白 + 窗口内柔和投影 + 不透明渐变，不然一块没底的窗口飘在壁纸上会很难看。
+        """
+        want = self._skin == "glass"
+        if want:
+            if self.isVisible() and not self._glass:
+                self._glass = _backdrop.apply_acrylic(self, "#FFFFFF", _ACRYLIC_TINT)
+                if not self._glass:
+                    # DWM 偶发不接受合成属性（实测切换瞬间会失败一次），稍后重试一次
+                    QTimer.singleShot(60, self._retry_glass)
+        else:
+            if self._glass:
+                _backdrop.clear_acrylic(self)
+            self._glass = False
+        self._apply_pad()
+        self._sync_outer_shadow()
+        self.update()
+
+    def _retry_glass(self) -> None:
+        """Acrylic 第一次没开成时补一次（成功后同步留白与投影）。"""
+        if self._skin != "glass" or self._glass or not self.isVisible():
+            return
+        self._glass = _backdrop.apply_acrylic(self, "#FFFFFF", _ACRYLIC_TINT)
+        self._apply_pad()
+        self._sync_outer_shadow()
+        self.update()
+
+    def _apply_pad(self) -> None:
+        """按"玻璃是否真的开着"决定要不要投影留白。
+
+        窗口隐藏时（比如从设置页切皮肤）没法碰原生句柄，先乐观地按玻璃排版；
+        show 之后 `_sync_glass()` 再按真实结果纠正一次。
+        """
+        glass_now = (self._skin == "glass"
+                     and (self._glass or (not self.isVisible() and self._glass_supported)))
+        pad = 0 if glass_now else 19
+        if pad == getattr(self, "_shadow_pad", None):
+            return
+        self._shadow_pad = pad
+        self._relayout_for_pad()
+        if self.isVisible():
+            self._center()
+
+    # ---------- 毛玻璃的伴生投影 ----------
+    def _sync_outer_shadow(self) -> None:
+        """让伴生投影窗跟着主窗走：位置、尺寸、层级、显隐。
+
+        只有"毛玻璃真的开着"时才显示；原版窗口自己就把投影画在里面（pad=19），
+        这条路径完全不动。
+        """
+        want = self._skin == "glass" and self._glass and self.isVisible()
+        if not want:
+            if self._shadow_win is not None and self._shadow_win.isVisible():
+                self._shadow_win.hide()
+            return
+        if self._shadow_win is None:
+            self._shadow_win = _OuterShadow()
+        sw = self._shadow_win
+        pad = _OuterShadow.PAD
+        sw.setFixedSize(self.width() + pad * 2, self.height() + pad * 2)
+        sw.move(self.x() - pad, self.y() - pad)
+        if not sw.isVisible():
+            sw.show()
+            self._shadow_toolwindow(sw)
+            sw.update()
+        self._shadow_below_main()
+
+    @staticmethod
+    def _shadow_toolwindow(sw: QWidget) -> None:
+        """投影窗别进任务栏 / Alt+Tab（原生扩展样式，不改 Qt 窗口标志）。"""
+        try:
+            GWL_EXSTYLE = -20
+            WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = 0x00000080, 0x00040000
+            SWP = 0x0001 | 0x0002 | 0x0004 | 0x0020
+            user32 = ctypes.windll.user32
+            user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            user32.GetWindowLongW.restype = ctypes.c_long
+            user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+            user32.SetWindowLongW.restype = ctypes.c_long
+            user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                            ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, ctypes.c_uint]
+            user32.SetWindowPos.restype = ctypes.c_int
+            hwnd = ctypes.c_void_p(int(sw.winId()))
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            want = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+            if want != style:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, want)
+                user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED)
+        except Exception:
+            pass
+
+    def _shadow_below_main(self) -> None:
+        """把投影窗插到主窗正下方一层（两者都是 topmost，用 SetWindowPos 定序）。"""
+        if self._shadow_win is None:
+            return
+        try:
+            SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+            user32 = ctypes.windll.user32
+            user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                            ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, ctypes.c_uint]
+            user32.SetWindowPos.restype = ctypes.c_int
+            user32.SetWindowPos(ctypes.c_void_p(int(self._shadow_win.winId())),
+                                ctypes.c_void_p(int(self.winId())),
+                                0, 0, 0, 0,
+                                SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE)
+        except Exception:
+            pass
+
+    def moveEvent(self, event) -> None:  # noqa: N802
+        super().moveEvent(event)
+        self._sync_outer_shadow()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        super().hideEvent(event)
+        if self._shadow_win is not None:
+            self._shadow_win.hide()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # 热键重新唤出时窗口只是 show()，不走 show_window()；投影窗得跟着回来
+        self._sync_outer_shadow()
+
+    def apply_win_skin(self, name: str) -> None:
+        """设置页切换皮肤：留白、底色、背景材质一起换，即时生效，不需要重启。
+
+        毛玻璃把主窗收到面板大小（pad 19→0，投影改由伴生窗口画），切过去时窗口
+        收 38px、切回来再放出去；尺寸变了以后重新居中，避免面板贴着屏幕一角。
+        """
+        name = name if name in config.WIN_SKINS else config.DEFAULT_WIN_SKIN
+        if name == self._skin:
+            self._sync_glass()
+            return
+        self._skin = name
+        _skins.set_active(name)
+        self._sync_glass()
+        if self.isVisible():
+            self._center()
+        # 瓦片缓存了颜色与图标底样式，换皮肤后整块重建一次最稳（数量级很小）
+        try:
+            self.refresh_list()
+        except Exception:
+            pass
+        self._restyle_for_skin()
+
+    def _restyle_for_skin(self) -> None:
+        """把"只在创建时设一次"的样式按当前皮肤重刷一遍。
+
+        为什么需要：搜索框/输入 chip/滚动条/底栏文字都是构造时写死的 QSS，
+        运行时切皮肤不会自动变 —— 以前从原版切到毛玻璃，搜索框还是死白，
+        看着像没生效。QSS 片段统一在 skins.py 里生成，和构造时用的是同一段。
+        """
+        tk = _skins.active()
+        self.search_box.setStyleSheet(_skins.field_qss(tk))
+        self._input_chip.setStyleSheet(_skins.chip_qss(tk))
+        self.scroller.setStyleSheet(_skins.scroller_qss(tk))
+        self.empty_hint.setStyleSheet(f"color:{tk.text_secondary}; font-size:13px;")
+        self.foot.setStyleSheet(f"color:{tk.text_secondary}; font-size:11px;")
+        self.foot_hotkey.setStyleSheet(f"color:{tk.text_secondary}; font-size:11px;")
+
     def _apply_rounded_mask(self) -> None:
         """把窗口裁成圆角矩形（OS 级别遮罩），无边框也能看到圆角。
 
@@ -685,30 +941,61 @@ class MainWindow(QWidget):
         self.setMask(QRegion(QPolygon(pts)))
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        # 0.36 设计说明：外部柔和浅投影。
-        # 窗口比面板大一圈（_shadow_pad），面板（圆角矩形）画在内侧、保持原尺寸，
-        # 投影沿面板边缘向外羽化、溢出到四周留白区（显示在壁纸上）；layered 透明窗口下
-        # 圆角外不绘制即透明，无黑边。
+        # 两套皮肤两种画法：
+        # - 原版：窗口比面板大一圈（_shadow_pad=19），面板内侧、投影向外羽化；
+        # - 毛玻璃：pad=0，整个窗口就是面板；圆角交给 DWM（它连 Acrylic 模糊区
+        #   一起裁圆），投影由伴生窗口 _OuterShadow 画。
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = 14
-        pad = getattr(self, "_shadow_pad", 16)
+        pad = getattr(self, "_shadow_pad", 19)
         dy = 4  # 阴影向下偏移（偏下投影感）；过大会导致面板与阴影之间出现断档空隙
         rect = self.rect()
-        inner = rect.adjusted(pad, pad, -pad, -pad)  # 面板区域（原尺寸，不变）
-        # 阴影路径：与面板同形、整体下移 dy（上方留白更多、下方阴影更聚拢）
-        sh = QPainterPath()
-        sh.addRoundedRect(inner.x(), inner.y() + dy, inner.width(), inner.height(), r, r)
-        # 柔和阴影：沿阴影路径多层半透明描边；层数加倍 + 平方衰减 → 羽化更柔；
-        # 颜色偏蓝（深蓝灰）、整体很浅；扩散范围由 _shadow_pad 控制
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        layers = 2 * pad
-        for i in range(1, layers + 1):
-            t = 1 - i / layers
-            alpha = int(4 * t * t)  # 平方衰减：越靠外越快变淡 → 柔和羽化
-            p.setPen(QPen(QColor(50, 80, 145, alpha), i))  # 偏蓝阴影；线宽 i，最外半宽 = pad
-            p.drawPath(sh)
-        # 主体：白 → 淡蓝纵向渐变
+        inner = rect.adjusted(pad, pad, -pad, -pad)  # 面板区域（固定 860×520）
+        glass = getattr(self, "_glass", False)
+        if not glass:
+            # 阴影路径：与面板同形、整体下移 dy（上方留白更多、下方阴影更聚拢）
+            sh = QPainterPath()
+            sh.addRoundedRect(inner.x(), inner.y() + dy, inner.width(), inner.height(), r, r)
+            # 柔和阴影：沿阴影路径多层半透明描边；层数加倍 + 平方衰减 → 羽化更柔；
+            # 颜色偏蓝（深蓝灰）、整体很浅；扩散范围由 _shadow_pad 控制
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            layers = 2 * pad
+            for i in range(1, layers + 1):
+                t = 1 - i / layers
+                alpha = int(4 * t * t)  # 平方衰减：越靠外越快变淡 → 柔和羽化
+                p.setPen(QPen(QColor(50, 80, 145, alpha), i))  # 偏蓝阴影；线宽 i，最外半宽 = pad
+                p.drawPath(sh)
+        # 主体：毛玻璃（Acrylic）或原来的不透明白→淡蓝渐变
+        if glass:
+            # 「液态玻璃」：半透明白罩层（0.78→0.74）+ 顶部一道 88px 白色高光（sheen）。
+            # 罩层不能太透：Acrylic 自身带灰调，纯模糊会把壁纸暗部拖进来，面板就发灰；
+            # 高光则是苹果玻璃最像的一点——有了它，"一块磨砂"才变成"一片有厚度的玻璃"。
+            # 圆角仍交给 DWM 裁（自己画会和系统半径打架露细边）。
+            tk = _skins.active()
+            grad = QLinearGradient(0, 0, 0, rect.height())
+            grad.setColorAt(0.0, tk.scrim_top)
+            grad.setColorAt(1.0, tk.scrim_bottom)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(grad)
+            p.drawRect(rect)
+            if tk.sheen.alpha() > 0:
+                sh = QLinearGradient(0, 0, 0, tk.sheen_height)
+                sh.setColorAt(0.0, tk.sheen)
+                sh.setColorAt(1.0, QColor(tk.sheen.red(), tk.sheen.green(),
+                                         tk.sheen.blue(), 0))
+                p.setBrush(sh)
+                p.drawRect(0, 0, rect.width(), tk.sheen_height)
+            # 一圈 1px 内高光：玻璃和壁纸之间要有道"折边"才立得住，
+            # 圆角跟 DWM 一致（约 8），用抗锯齿路径描在内侧 0.5px 避免糊边
+            pen = QPen(QColor(255, 255, 255, 150))
+            pen.setWidthF(1.0)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            hl = QPainterPath()
+            hl.addRoundedRect(rect.adjusted(0, 0, -1, -1).toRectF(), 7.5, 7.5)
+            p.drawPath(hl)
+            return
         path = QPainterPath()
         path.addRoundedRect(inner.x(), inner.y(), inner.width(), inner.height(), r, r)
         grad = QLinearGradient(0, inner.y(), 0, inner.bottom())
@@ -720,6 +1007,7 @@ class MainWindow(QWidget):
 
     def _setup_ui(self) -> None:
         _dbg_print("[LyLaunch] E1: _setup_ui 开始", flush=True)
+        tk = _skins.active()   # 本次构造用的皮肤 token（切皮肤时由 _restyle_for_skin 重刷）
         self.central = QWidget(self)
         self.central.setStyleSheet("background:transparent;")  # 渐变底在窗口 paintEvent
         # QWidget 没有 setCentralWidget，直接把 central 作为本窗口唯一子控件
@@ -728,6 +1016,7 @@ class MainWindow(QWidget):
         layout.addWidget(self.central)
 
         root = QVBoxLayout(self.central)
+        self._root_layout = root   # 皮肤切换要按新的投影留白重算内容边距
         # 内容边距 = 原 16/8 + 阴影留白：内容距面板边仍保持原 16px，同时把面板推到窗口内侧
         pad = getattr(self, "_shadow_pad", 18)
         root.setContentsMargins(16 + pad, 16 + pad, 16 + pad, 8 + pad)
@@ -739,11 +1028,7 @@ class MainWindow(QWidget):
         search_box = QLineEdit()
         search_box.setPlaceholderText("搜索应用…")
         search_box.setFixedHeight(46)
-        search_box.setStyleSheet(
-            "QLineEdit{background:#FFFFFF; border:1px solid transparent; border-radius:10px;"
-            "padding:0 14px; font-size:16px; color:#161C28;}"
-            "QLineEdit:focus{border:1px solid #2F6BEE;}"
-        )
+        search_box.setStyleSheet(_skins.field_qss(tk))
         top.addWidget(search_box, stretch=1)
 
         settings_btn = SettingsButton()
@@ -761,8 +1046,7 @@ class MainWindow(QWidget):
         self._input_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._input_chip.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._input_chip.setStyleSheet(
-            "background:#FFFFFF; border:1px solid #D8E3F5; border-radius:8px;")
+        self._input_chip.setStyleSheet(_skins.chip_qss(tk))
         self._input_chip.hide()
 
         # 用事件过滤器拦截搜索框的箭头/回车/Esc，转成窗口级导航
@@ -778,16 +1062,7 @@ class MainWindow(QWidget):
         # 细滚动条：只留一条 4px 的滑块，轨道/箭头/翻页区全透明。
         # 默认 QScrollBar 会带上下箭头和 add/sub-page 的灰底，不显式清掉时
         # 即使把 width 设成 4px 看起来仍是一条粗灰带（截图里就是这个问题）。
-        self.scroller.setStyleSheet(
-            "QScrollArea{border:none; background:transparent;}"
-            "QScrollBar:vertical{width:3px; margin:0; border:none; background:transparent;}"
-            "QScrollBar::groove:vertical{background:transparent; border:none;}"
-            "QScrollBar::handle:vertical{background:#C3D3EE; border-radius:1px; min-height:28px;}"
-            "QScrollBar::handle:vertical:hover{background:#B7C4D8;}"
-            "QScrollBar::handle:vertical:pressed{background:#5F6570;}"
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical{height:0;}"
-            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical{background:transparent;}"
-        )
+        self.scroller.setStyleSheet(_skins.scroller_qss(tk))
         # 滚动区不接收键盘焦点：否则方向键沿父链传到 QAbstractScrollArea 会被
         # 当成滚动指令，出现“左右键横向拖页面”的现象（页面只应上下翻页）。
         self.scroller.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -806,7 +1081,7 @@ class MainWindow(QWidget):
         # 空状态提示
         self.empty_hint = QLabel("")
         self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_hint.setStyleSheet("color:#5F6570; font-size:13px;")
+        self.empty_hint.setStyleSheet(f"color:{tk.text_secondary}; font-size:13px;")
         self.empty_hint.setWordWrap(True)   # 成本提示较长，窄窗口下允许换行
         self.empty_hint.setVisible(False)
         root.addWidget(self.empty_hint)
@@ -816,11 +1091,11 @@ class MainWindow(QWidget):
         foot_layout = QHBoxLayout(foot_row)
         foot_layout.setContentsMargins(6, 4, 6, 0)
         self.foot = QLabel(f"LyLaunch {config.VERSION}")
-        self.foot.setStyleSheet("color:#5F6570; font-size:11px;")
+        self.foot.setStyleSheet(f"color:{tk.text_secondary}; font-size:11px;")
         foot_layout.addWidget(self.foot)
         foot_layout.addStretch(1)
         self.foot_hotkey = QLabel(f"{self._hotkey_display} 唤出")
-        self.foot_hotkey.setStyleSheet("color:#5F6570; font-size:11px;")
+        self.foot_hotkey.setStyleSheet(f"color:{tk.text_secondary}; font-size:11px;")
         foot_layout.addWidget(self.foot_hotkey)
         root.addWidget(foot_row)
 
@@ -1414,6 +1689,10 @@ class MainWindow(QWidget):
         _dbg_print("[LyLaunch] G2: show 完成", flush=True)
         # 面板不进任务栏 / Alt+Tab（原生扩展样式，每次 show 后兜一次，幂等）
         self._hide_from_taskbar()
+        # 毛玻璃皮肤：第一次 show() 后原生句柄才稳定，这里再开 Acrylic。
+        # 失败（Win10 早期 / 关了透明效果 / 显卡不支持）就退回原版那套不透明渐变 + 投影。
+        if self._skin == "glass":
+            self._sync_glass()
         # 关掉 DWM 淡出过渡：截图前要 hide() 主面板再抓屏，过渡的半透明帧会被截进图里。
         # 必须在 show() 之后做（构造期碰 winId() 有崩进程的历史），用标志位保证只设一次。
         if not getattr(self, "_no_transition", False):
@@ -1755,23 +2034,44 @@ class MainWindow(QWidget):
             # Qt 边距只能整数，用「标题上+2 / 网格下+1」≈ 平均 1.5px 的折中
             extra_top = 2 if label in ("收藏应用", "插件", "应用") else 0
             extra_bottom = 1 if label in ("收藏应用", "插件", "应用") else 0
-            # 区块标题：主色竖杠 + 名称 + 数量，层级比旧版 16px 大黑标题更克制
+            # 区块标题：原版保留主色竖杠；玻璃皮肤去掉竖杠（那是 Windows/Android 味），
+            # 改成苹果那种"小号、正字距、克制"的分组头。
+            tk = _skins.active()
+            glass_skin = tk.name == "glass"
             header = QWidget()
             hb = QHBoxLayout(header)
             hb.setContentsMargins(4, 6 + extra_top, 4, 4)
             hb.setSpacing(6)
-            accent = QLabel()
-            accent.setFixedSize(4, 14)
-            accent.setStyleSheet("background:#2F6BEE; border-radius:2px;")
-            hb.addWidget(accent)
+            if not glass_skin:
+                accent = QLabel()
+                accent.setFixedSize(4, 14)
+                accent.setStyleSheet("background:#2F6BEE; border-radius:2px;")
+                hb.addWidget(accent)
             title = QLabel(label)
-            title.setStyleSheet("font-size:13px; font-weight:600; color:#161C28;")
+            if glass_skin:
+                tf = QFont(title.font())
+                tf.setPixelSize(11)          # 小一号
+                tf.setWeight(QFont.Weight.DemiBold)
+                tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.8)  # 正字距
+                title.setFont(tf)
+                # 分组头往下压一级：让 12px 的近黑项目名成为真正的视觉主体
+                # （但不能太淡，否则读不出层级）
+                title.setStyleSheet("color:rgba(29,29,31,0.82);")
+            else:
+                title.setStyleSheet("font-size:13px; font-weight:600; color:#161C28;")
             hb.addWidget(title)
             # 数量用真实总数：插件首页只铺一行，写 8 会让人以为只有 8 个
             shown_total = (max(len(group), getattr(self, "_plugin_total", 0))
                            if label == "插件" else len(group))
             count = QLabel(str(shown_total))
-            count.setStyleSheet("font-size:12px; color:#5F6570;")
+            if glass_skin:
+                cf = QFont(count.font())
+                cf.setPixelSize(11)
+                cf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.4)
+                count.setFont(cf)
+                count.setStyleSheet(f"color:{tk.text_secondary};")
+            else:
+                count.setStyleSheet("font-size:12px; color:#5F6570;")
             hb.addWidget(count)
             hb.addStretch(1)
             # 「全部 >」：一行（最多 8 个）放得下就不给按钮 —— 空着也是空着。
@@ -1798,10 +2098,11 @@ class MainWindow(QWidget):
                 # 常态用主色 62% 透明（同色相但更轻），hover 才回到实心主色，
                 # 保证"淡"的同时仍看得出可点。
                 all_btn.setStyleSheet(
-                    "QPushButton{background:transparent; border:none; border-radius:6px;"
-                    " color:rgba(47,107,238,0.62); font-size:11px; font-weight:500;"
+                    "QPushButton{background:transparent; border:none; border-radius:8px;"
+                    f" color:{tk.link}; font-size:11px; font-weight:500;"
                     " padding:3px 8px;}"
-                    "QPushButton:hover{color:#2F6BEE; background:#E4EDFC;}")
+                    f"QPushButton:hover{{color:{tk.link_hover};"
+                    f" background:{tk.link_hover_bg};}}")
                 all_btn.setToolTip(
                     "回到首页" if expanded else f"查看全部「{label}」（共 {real_total} 个）")
                 all_btn.clicked.connect(
@@ -2403,6 +2704,8 @@ class MainWindow(QWidget):
         self._settings_window = None
         self._center()
         self.show()
+        # 设置里刚切过皮肤时，主窗口一直是隐藏的：show() 之后补一次 Acrylic。
+        self._sync_glass()
         self.raise_()
         self.activateWindow()
         self.search_box.setFocus()

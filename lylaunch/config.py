@@ -13,7 +13,7 @@ from typing import Optional
 
 from . import paths
 
-VERSION = "1.2.0"  # LyLaunch 版本号
+VERSION = "1.2.1"  # LyLaunch 版本号
 
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
@@ -257,5 +257,32 @@ def save_close_action(value: str) -> None:
     if not isinstance(data, dict):
         data = {}
     data["CloseAction"] = v
+    data.setdefault("Version", VERSION)
+    _write_json(paths.CONFIG_FILE, data)
+
+
+# ---------- 主窗口皮肤（config.json） ----------
+# solid = 0.36 起的白→淡蓝渐变（默认，老用户不受影响）
+# glass = 系统 Acrylic 毛玻璃（跟随壁纸模糊，需要系统开启透明效果）
+WIN_SKINS = ("solid", "glass")
+WIN_SKIN_LABELS = {"solid": "原版", "glass": "毛玻璃"}
+DEFAULT_WIN_SKIN = "solid"
+
+
+def load_win_skin() -> str:
+    """主窗口皮肤：solid=原版渐变 / glass=Acrylic 毛玻璃。"""
+    data = _read_json(paths.CONFIG_FILE)
+    value = str((data or {}).get("WinSkin", DEFAULT_WIN_SKIN)).lower()
+    return value if value in WIN_SKINS else DEFAULT_WIN_SKIN
+
+
+def save_win_skin(value: str) -> None:
+    v = str(value).lower()
+    if v not in WIN_SKINS:
+        return
+    data = _read_json(paths.CONFIG_FILE)
+    if not isinstance(data, dict):
+        data = {}
+    data["WinSkin"] = v
     data.setdefault("Version", VERSION)
     _write_json(paths.CONFIG_FILE, data)
