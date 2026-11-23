@@ -1378,12 +1378,16 @@ class SettingsWindow(QDialog):
                 # 从"共用 18090"改成"独立 18091"之后，旧文件还指着插件那套端口
                 tail += (f"；写进去的地址还是旧端口 {st.base_port}，"
                          "点一次「接入」切到外部引擎")
+            if st.ctx_mismatch:
+                # 滑块档位改过、但 dsh 那份还按老窗口算预算：dsh 会显示 /16.4K
+                tail += (f"；写进去的窗口还是 {_ctx_text(st.base_ctx)}，"
+                         f"点一次「接入」更新到 {_ctx_text(config.load_engine_context())}")
             if too_small:
                 tail += (f"；上下文只有 {_ctx_text(config.load_engine_context())}，"
                          "跑 dsh 会爆窗，把上面「模型上下文」调大")
             if not st.engine_online:
                 tail += "；外部引擎现在没在跑，dsh 会报 Connection error，把「启用外部引擎」打开"
-            wrong = st.port_mismatch or too_small or not st.engine_online
+            wrong = st.port_mismatch or st.ctx_mismatch or too_small or not st.engine_online
             self.dsh_hint.setText(
                 f"已接入：{ids}。到 dsh 的模型选择器里选「{_dsh.PROVIDER_NAME}」{tail}")
             self.dsh_hint.set_color(_t.WARNING if wrong else None)

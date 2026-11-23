@@ -77,6 +77,8 @@ class Status:
     engine_online: bool = False     # 外部引擎（18091）在不在：不在 dsh 必然 Connection error
     base_port: int = 0              # 已写入的 baseURL 端口（0 = 没读到）
     port_mismatch: bool = False     # 写的是旧端口（例如 18090），需要重新接入
+    base_ctx: int = 0               # 已写入的 contextWindow（0 = 没读到）
+    ctx_mismatch: bool = False      # 写进去的窗口跟滑块档位不一致，需要重新接入
 
 
 # ---------------------------------------------------------------- 路径与模型
@@ -148,10 +150,10 @@ def chat_models() -> list[ChatModel]:
 
 
 def _as_chat_model(spec) -> ChatModel:
-    # 上下文取引擎实际加载的那个数（设置页的全局档），不是模型出厂值：
+    # 上下文取外部那套 Router 实际加载的数（设置页滑块），不是插件那套的出厂值：
     # dsh 用这个数算 token 预算，报小了会在引擎明明够用的情况下 400。
     from ..engine.registry import effective_ctx
-    ctx = effective_ctx(spec)
+    ctx = effective_ctx(spec, external=True)
     # 输出上限取上下文的 1/4、封顶 8192：dsh 的系统提示 + 工具描述要 ~9.4k tokens，
     # 给生成留太多会在 prompt + 输出撞 n_ctx（直接 400）；但压到 4096 又会让长回答
     # 被截断（「已达到输出 token 上限」），所以按窗口大小往上放一档。
@@ -498,8 +500,8 @@ def _drop_env_line() -> None:
 
 
 # ---------------------------------------------------------------- 对外操作
-def _provider_model_ids(lines: list[str]) -> list[str]:
-    """我们那条 provider 下登记的模型 id（有哨兵就按哨兵，没有就按 id 段落）。"""
+def _own_range(lines: list[str]) -> tuple[int, int]:
+    """我们自己那一段的行区间（有哨兵就按哨兵，没有就按 provider id 段落）。"""
     start, stop = 0, len(lines)
     i_key = _provider_key_line(lines)
     if i_key >= 0:
@@ -511,6 +513,12 @@ def _provider_model_ids(lines: list[str]) -> list[str]:
         start = mark
         stop = next((i for i in range(mark + 1, len(lines))
                      if lines[i].strip().startswith("#") and _MARK_TAIL in lines[i]), len(lines))
+    return start, stop
+
+
+def _provider_model_ids(lines: list[str]) -> list[str]:
+    """我们那条 provider 下登记的模型 id。"""
+    start, stop = _own_range(lines)
     ids: list[str] = []
     for line in lines[start:stop]:
         s = line.strip()
@@ -520,6 +528,7 @@ def _provider_model_ids(lines: list[str]) -> list[str]:
 
 
 _BASE_PORT_RE = re.compile(r"baseURL:\s*\"?[^\"\n]*:(\d+)")
+_CTX_RE = re.compile(r"contextWindow:\s*(\d+)")
 
 
 def _written_base_port(lines: list[str]) -> int:
@@ -534,6 +543,23 @@ def _written_base_port(lines: list[str]) -> int:
     return 0
 
 
+def _written_ctx(lines: list[str]) -> int:
+    """读已写入的 contextWindow（取我们那段里最小的那个）；读不到返回 0。"""
+    start, stop = _own_range(lines)
+    found: list[int] = []
+    for line in lines[start:stop]:
+        m = _CTX_RE.search(line)
+        if m:
+            found.append(int(m.group(1)))
+    return min(found) if found else 0
+
+
+def _expected_ctx() -> int:
+    """滑块档位对应的窗口：写进 dsh 的那个数应该跟它一致。"""
+    models = chat_models()
+    return models[0].context if models else 0
+
+
 def probe() -> Status:
     """给设置页显示用的状态；不抛异常，读不到就当没装。"""
     home = dsh_home()
@@ -543,6 +569,8 @@ def probe() -> Status:
     models = tuple(_provider_model_ids(lines)) if applied else ()
     bak = backup_of(target)
     base_port = _written_base_port(lines)
+    base_ctx = _written_ctx(lines)
+    want_ctx = _expected_ctx()
     return Status(
         home=home,
         target=target,
@@ -554,6 +582,8 @@ def probe() -> Status:
         engine_online=engine_online(),
         base_port=base_port,
         port_mismatch=bool(applied and base_port and base_port != EXTERNAL_PORT),
+        base_ctx=base_ctx,
+        ctx_mismatch=bool(applied and base_ctx and want_ctx and base_ctx != want_ctx),
     )
 
 
