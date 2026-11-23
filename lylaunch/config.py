@@ -254,6 +254,20 @@ def save_engine_context(value: int) -> None:
     save_engine_cfg({"ctx_size": engine_context_value(engine_context_index(value))})
 
 
+# 外部引擎（给 dsh 这类外部工具用的第二套 Router，端口 18091）。
+# 默认关闭：平时只有插件那套 18090 在跑。打开后插件那一套的模型会被卸载并暂用
+# 不了（显存要让给外部引擎），所以必须显式开启、写盘记状态。
+DEFAULT_EXT_ENGINE = False
+
+
+def load_ext_engine() -> bool:
+    return bool(load_engine_cfg().get("ext_engine", DEFAULT_EXT_ENGINE))
+
+
+def save_ext_engine(on: bool) -> None:
+    save_engine_cfg({"ext_engine": bool(on)})
+
+
 
 # ---------- 首页瓦片手动顺序（应用 / 系统应用） ----------
 def load_tile_order(group: str) -> list[str]:

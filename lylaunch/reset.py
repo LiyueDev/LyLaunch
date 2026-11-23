@@ -122,10 +122,13 @@ def _remove(p: Path) -> None:
 
 
 def shutdown_engine() -> None:
-    """先把 Router 整棵树杀掉：模型文件被它 mmap 着，不停根本删不掉。"""
+    """先把 Router 整棵树杀掉：模型文件被它 mmap 着，不停根本删不掉。
+
+    两套都要停 —— 外部引擎（18091）同样 mmap 着模型文件。
+    """
     try:
-        from .engine import EngineManager
-        EngineManager.instance().shutdown()
+        from .engine import shutdown_all
+        shutdown_all()
     except Exception:
         pass
 

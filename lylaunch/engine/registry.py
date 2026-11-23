@@ -258,7 +258,13 @@ def models_dir() -> Path:
 
 
 def preset_path() -> Path:
+    """插件那套 Router 的 preset。"""
     return engine_dir() / "models.ini"
+
+
+def external_preset_path() -> Path:
+    """外部集成（dsh）那套 Router 的 preset：独立文件，两套 ctx 互不干扰。"""
+    return engine_dir() / "models-ext.ini"
 
 
 def _candidate_paths(spec: ModelDef, name: str) -> list[Path]:
@@ -330,23 +336,26 @@ def model_files_problem(spec: ModelDef) -> str:
 
 
 # ---------------------------------------------------------------- preset INI
-def effective_ctx(spec: ModelDef) -> int:
-    """该模型实际使用的上下文窗口：用户在「外部集成」页选的全局档。
+def effective_ctx(spec: ModelDef, external: bool = False) -> int:
+    """该模型实际使用的上下文窗口。
 
-    出厂值（spec.ctx）只是各模型自己的默认，不做上限——用户为了让 dsh 这类
-    外部工具跑得动而统一调大时，工厂默认会把请求挡回去（9B 的 16K 上限根本
-    放不下 dsh 约 9.4K 的系统提示 + 4096 output）。preset 与 dsh 的
-    contextWindow 必须同取这一个数，否则引擎按 32K 加载、dsh 按 16K 算预算，
-    请求还是会被拒。
+    两套 Router 各用各的：
+    - **外部集成那套**（``external=True``）取设置页滑块的全局档。dsh 的 agent
+      系统提示 + 工具描述就要约 9.4K tokens，出厂 16K 里塞不下多少对话，
+      所以这个值必须能调大，且与写进 dsh 的 ``contextWindow`` 同源。
+    - **插件那套**用模型自己的出厂值：翻译 / OCR / 本地 AI 的请求都短，
+      跟着调到 64K 只会白吃 KV cache，还可能让加载失败。
     """
-    try:
-        from .. import config
-        return int(config.load_engine_context())
-    except Exception:
-        return int(spec.ctx)
+    if external:
+        try:
+            from .. import config
+            return int(config.load_engine_context())
+        except Exception:
+            return int(spec.ctx)
+    return int(spec.ctx)
 
 
-def render_preset() -> str:
+def render_preset(external: bool = False) -> str:
     """生成 --models-preset 的 INI。
 
     硬约束（踩过的坑，别改）：
@@ -367,7 +376,7 @@ def render_preset() -> str:
         mp = mmproj_path(spec)
         if mp is not None:
             lines.append(f"mmproj = {mp}")
-        lines.append(f"ctx-size = {effective_ctx(spec)}")
+        lines.append(f"ctx-size = {effective_ctx(spec, external)}")
         lines.append(f"n-gpu-layers = {spec.ngl}")
         lines.append(f"jinja = {'true' if spec.jinja else 'false'}")
         if spec.reasoning:
@@ -378,11 +387,11 @@ def render_preset() -> str:
     return "\n".join(lines)
 
 
-def write_preset() -> Path:
-    """把 preset 写到 engine/models.ini（每次启动 router 前重写）。"""
-    p = preset_path()
+def write_preset(external: bool = False) -> Path:
+    """把 preset 写盘（每次启动对应那套 router 前重写）。"""
+    p = external_preset_path() if external else preset_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(render_preset(), encoding="utf-8")
+    p.write_text(render_preset(external), encoding="utf-8")
     return p
 
 

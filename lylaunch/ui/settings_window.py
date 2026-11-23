@@ -274,16 +274,18 @@ class _DshProbe(QThread):
 
 
 class _EngineWarm(QThread):
-    """后台把本地 Router 拉起来（第一次启动约 1~2 秒，别卡住设置页）。"""
+    """后台跑一次引擎动作（起 / 重启，首次启动约 1~2 秒，别卡住设置页）。"""
 
     done = Signal(bool)
+
+    def __init__(self, target, parent=None) -> None:
+        super().__init__(parent)
+        self._target = target
 
     def run(self) -> None:  # noqa: D401 - QThread 入口
         ok = False
         try:
-            from ..engine.manager import EngineManager
-            EngineManager.instance().start()
-            ok = True
+            ok = bool(self._target())
         except Exception:      # 起不来不抛：状态由提示文案交代
             ok = False
         self.done.emit(ok)
@@ -1057,11 +1059,11 @@ class SettingsWindow(QDialog):
 
     # ---------- 外部集成（独立页） ----------
     def _build_integrations_page(self, lay: QVBoxLayout) -> None:
-        """DeepSeek Harness 接入 + 上下文窗口。
+        """DeepSeek Harness 接入 + 独立的外部引擎。
 
-        两件事放一页，是因为它们必须成对配：接入只写 dsh 那边的 provider，
-        上下文写的是引擎 preset 的 ctx-size；上下文给不够，接上了也一定 400
-        （dsh 的系统提示 + 工具描述约 9.4K tokens）。
+        外部集成跑在自己的一套 Router（18091）上：preset 是 Router 启动时读进内存的，
+        和插件共用一套就意味着「改外部集成的上下文要打断插件正在用的模型」，
+        所以拆两套、各用各的 preset 与端口。开关默认关闭，打开时插件那套的模型被卸载。
         """
         cv = self._group(lay, "DeepSeek Harness")
         self.dsh_apply_btn = self._ghost_button("接入", self._on_dsh_apply)
@@ -1073,17 +1075,15 @@ class SettingsWindow(QDialog):
         self.dsh_hint = self._hint_label(col, wide=True)
         self._refresh_dsh_hint()
 
-        # dsh 直接打 127.0.0.1:18090：LyLaunch 没在跑引擎就必然 Connection error。
-        # 常驻的只是 Router 空壳，模型仍按需加载（不加载就不占显存）。
-        self.keep_engine = SwitchButton()
-        self.keep_engine.toggled.connect(self._on_keep_engine)
-        col = self._row(cv, "保持本地引擎运行",
-                        "dsh 这类外部工具要连本机端口；开了之后引擎随程序启动，平时不加载模型",
-                        self.keep_engine, divider=True, wide_hint=True)
-        self.keep_engine_hint = self._hint_label(col, wide=True)
-        self._load_keep_engine()
+        cv2 = self._group(lay, "外部引擎")
+        self.ext_engine = SwitchButton()
+        self.ext_engine.toggled.connect(self._on_ext_engine)
+        col = self._row(cv2, "启用外部引擎",
+                        "给 dsh 单开一套 Router（端口 18091）；开启后插件暂时用不了本地模型，"
+                        "显存整块让给它",
+                        self.ext_engine, wide_hint=True)
+        self.ext_hint = self._hint_label(col, wide=True)
 
-        cv2 = self._group(lay, "上下文窗口")
         self.ctx_value = self._pill(_ctx_text(config.load_engine_context()))
         self.ctx_slider = QSlider(Qt.Orientation.Horizontal)
         self.ctx_slider.setFixedWidth(188)
@@ -1100,12 +1100,30 @@ class SettingsWindow(QDialog):
         self._ctx_timer.setInterval(400)
         self._ctx_timer.timeout.connect(self._commit_engine_ctx)
         col = self._row(cv2, "模型上下文",
-                        "dsh 的系统提示和工具描述就要约 9.4K tokens，给少了会话直接 400",
+                        "只作用于外部引擎；dsh 的系统提示和工具描述就要约 9.4K tokens",
                         self._controls(self.ctx_slider, self.ctx_value),
-                        wide_hint=True)
+                        divider=True, wide_hint=True)
         self.ctx_hint = self._hint_label(col, wide=True)
         self._load_engine_ctx()
 
+        self.ext_restart_btn = self._ghost_button("重启", lambda: self._on_ext_restart())
+        self.ext_stop_btn = self._ghost_button("结束", lambda: self._on_ext_stop())
+        col = self._row(cv2, "引擎进程",
+                        "改完上下文要重启才生效；dsh 报 Connection error 时先确认这里还在跑",
+                        self._controls(self.ext_restart_btn, self.ext_stop_btn),
+                        divider=True, wide_hint=True)
+        self.ext_proc_hint = self._hint_label(col, wide=True)
+
+        # 插件那套引擎的常驻开关：和外部引擎同一张卡片，省一屏高度；两者互斥关系写在提示里
+        self.keep_engine = SwitchButton()
+        self.keep_engine.toggled.connect(self._on_keep_engine)
+        col = self._row(cv2, "保持插件引擎运行",
+                        "翻译 / 文档识别 / 本地 AI 共用 18090；开着就随程序启动，平时不加载模型",
+                        self.keep_engine, divider=True, wide_hint=True)
+        self.keep_engine_hint = self._hint_label(col, wide=True)
+        self._load_keep_engine()
+
+        self._load_ext_engine()
         self._start_dsh_probe()
 
     def _load_engine_ctx(self) -> None:
@@ -1122,34 +1140,32 @@ class SettingsWindow(QDialog):
         self._ctx_timer.start()
 
     def _commit_engine_ctx(self) -> None:
-        """把滑块当前档位写进设置：preset 的 ctx-size 与 dsh 的 contextWindow 一起改。"""
+        """把滑块当前档位写进设置：外部 preset 的 ctx-size 与 dsh 的 contextWindow 一起改。
+
+        只重启外部那套 Router（18091）：插件那套的 preset 不吃这个值，也不该被打断。
+        """
         self._ctx_timer.stop()
         value = config.engine_context_value(self.ctx_slider.value())
         if value == config.load_engine_context():
             self._refresh_ctx_hint()
             return
 
-        from ..engine.manager import EngineManager
-        from ..engine.runtime import port_health
+        from ..engine.external import ExternalEngine
         try:
-            mgr = EngineManager.instance()
+            ext = ExternalEngine.instance()
+            running = ext.running()
         except Exception as e:
-            _t.show_warning(self, "设置失败", f"读取引擎状态失败：{e}")
+            _t.show_warning(self, "设置失败", f"读取外部引擎状态失败：{e}")
             self._load_engine_ctx()
             return
 
-        running = False
-        try:
-            running = port_health(mgr.port, timeout=0.6)
-        except Exception:
-            running = False
         if running:
             if not _t.ask_confirm(
-                self, "需要重启本地引擎",
-                f"上下文改成 {_ctx_text(value)} 之后要重启本地推理引擎，"
-                "当前已加载的模型会被卸载。\n\n"
+                self, "需要重启外部引擎",
+                f"上下文改成 {_ctx_text(value)} 之后要重启外部引擎（端口 18091），"
+                "dsh 里已加载的模型会被卸载。\n\n"
                 "大上下文更吃显存：9B 模型 16K 约 7.5GB，再翻倍就是 KV cache 也翻倍。\n\n"
-                "下次打开翻译 / 文档识别 / 本地 AI 时会按新值重新加载，不用手动处理。\n\n"
+                "插件那套引擎不受影响。dsh 下次发消息时会按新值重新加载。\n\n"
                 "确定修改吗？",
                 yes_text="修改并重启", no_text="算了",
             ):
@@ -1157,7 +1173,7 @@ class SettingsWindow(QDialog):
                 return
 
         try:
-            res = mgr.set_engine_context(value)
+            res = ext.set_context(value)
         except Exception as e:
             _t.show_warning(self, "设置失败", f"写入引擎设置失败：{e}")
             self._load_engine_ctx()
@@ -1166,11 +1182,9 @@ class SettingsWindow(QDialog):
         # dsh 那边的 contextWindow 也得跟着改，否则它按旧值算预算照样 400
         self._resync_dsh_context()
         self._refresh_ctx_hint()
+        self._refresh_ext_hint()
         if res.get("restarted"):
-            self.ctx_hint.setText(self.ctx_hint.text() + "\n引擎已重启，设置已生效。")
-            # 重启等于把 Router 停掉了：开着常驻就顺手拉回来，否则 dsh 立刻 Connection error
-            if config.load_keep_engine():
-                self._warm_engine()
+            self.ctx_hint.setText(self.ctx_hint.text() + "\n外部引擎已按新值重启。")
 
     def _resync_dsh_context(self) -> None:
         """上下文变了就把已接入的 dsh provider 段重写一遍（没接入就什么都不做）。"""
@@ -1199,6 +1213,138 @@ class SettingsWindow(QDialog):
             self.ctx_hint.set_color(None)
         self.ctx_hint.setText(f"当前 {_ctx_text(value)} · {tail}")
 
+    # ---------- 外部引擎（第二套 Router） ----------
+    def _ext(self):
+        """外部引擎单例；拿不到返回 None（引擎模块缺失时设置页仍要能建起来）。"""
+        try:
+            from ..engine.external import ExternalEngine
+            return ExternalEngine.instance()
+        except Exception:
+            return None
+
+    def _load_ext_engine(self) -> None:
+        """开关对齐到已保存的状态，再刷一次状态文案。"""
+        on = config.load_ext_engine()
+        self.ext_engine.blockSignals(True)
+        self.ext_engine.setChecked(on)
+        self.ext_engine.blockSignals(False)
+        self._refresh_ext_hint()
+
+    def _refresh_ext_hint(self) -> None:
+        """外部引擎现在到底跑没跑、pid 多少、已加载模型的实际 n_ctx。"""
+        from ..engine import EXTERNAL_PORT
+        want = config.load_engine_context()
+        state = {"running": False, "pid": 0, "port": EXTERNAL_PORT,
+                 "n_ctx": 0, "enabled": config.load_ext_engine()}
+        ext = self._ext()
+        if ext is not None:
+            try:
+                state = ext.state()
+            except Exception:
+                pass
+        if state["running"]:
+            ctx = state["n_ctx"]
+            if ctx and ctx != want:
+                self.ext_hint.setText(
+                    f"运行中 · pid {state['pid']} · 已加载 {_ctx_text(ctx)}"
+                    f"（设置是 {_ctx_text(want)}），点「重启」让它按新值加载")
+                self.ext_hint.set_color(_t.WARNING)
+            else:
+                tail = f" · n_ctx {_ctx_text(ctx)}" if ctx else ""
+                self.ext_hint.setText(
+                    f"运行中 · pid {state['pid']} · 端口 {state['port']}{tail} · 插件暂停使用本地模型")
+                self.ext_hint.set_color(_t.SUCCESS)
+        elif state["enabled"]:
+            self.ext_hint.setText(
+                "已开启，但 18091 还没应答（首次启动要一两秒；一直不行就点「重启」）")
+            self.ext_hint.set_color(_t.WARNING)
+        else:
+            self.ext_hint.setText("已关闭 · 插件可以正常用本地模型；dsh 现在连不上（Connection error）")
+            self.ext_hint.set_color(None)
+        self.ext_proc_hint.setText("「重启」按当前上下文重新加载；「结束」只收掉外部引擎，不影响主程序")
+
+    def _on_ext_engine(self, checked: bool) -> None:
+        if not checked:
+            ext = self._ext()
+            if ext is not None:
+                try:
+                    ext.disable()
+                except Exception:
+                    pass
+            self._load_ext_engine()
+            self._start_dsh_probe()
+            return
+        if not _t.ask_confirm(
+            self, "启用外部引擎",
+            "会单独起一套推理引擎（端口 18091），专给 dsh 用：\n\n"
+            "· 插件那套已加载的模型会先被卸载，之后翻译 / 文档识别 / 本地 AI 暂时用不了本地模型\n"
+            f"· 9B 模型按当前上下文（{_ctx_text(config.load_engine_context())}）加载，"
+            "显存占用比插件那套高\n\n"
+            "确定启用吗？",
+            yes_text="启用",
+        ):
+            self._load_ext_engine()      # 回弹：用户点了「算了」
+            return
+        self._warm_external()
+
+    def _warm_external(self) -> None:
+        self.ext_hint.setText("正在启动外部引擎…")
+        self.ext_hint.set_color(None)
+        ext = self._ext()
+        if ext is None:
+            self.ext_hint.setText("外部引擎模块不可用，看看安装是否完整")
+            self.ext_hint.set_color(_t.DANGER)
+            return
+        warm = _EngineWarm(ext.enable, self)
+        warm.done.connect(self._on_ext_warm)
+        warm.finished.connect(warm.deleteLater)
+        self._ext_warm = warm            # 保住引用：线程跑完前被回收会崩进程
+        warm.start()
+
+    def _on_ext_warm(self, ok: bool) -> None:
+        self._load_ext_engine()
+        if not ok:
+            self.ext_hint.setText(
+                "外部引擎没起来（端口被占或运行库缺失），看「开发者」页的 engine-ext.log")
+            self.ext_hint.set_color(_t.DANGER)
+        self._start_dsh_probe()          # 引擎状态变了，接入提示里"没在跑"该消掉
+
+    def _on_ext_restart(self) -> None:
+        ext = self._ext()
+        if ext is None:
+            return
+        if not _t.ask_confirm(
+            self, "重启外部引擎",
+            "会卸载 dsh 里已加载的模型，按当前上下文重新加载。\n\n确定吗？",
+            yes_text="重启",
+        ):
+            return
+        self.ext_hint.setText("正在重启外部引擎…")
+        self.ext_hint.set_color(None)
+        warm = _EngineWarm(ext.restart, self)
+        warm.done.connect(self._on_ext_warm)
+        warm.finished.connect(warm.deleteLater)
+        self._ext_warm = warm
+        warm.start()
+
+    def _on_ext_stop(self) -> None:
+        ext = self._ext()
+        if ext is None:
+            return
+        if not _t.ask_confirm(
+            self, "结束外部引擎",
+            "18091 会立刻断开，dsh 那边会报 Connection error。\n\n"
+            "插件那套不受影响，但「启用外部引擎」开关也会一起关掉。确定吗？",
+            yes_text="结束",
+        ):
+            return
+        try:
+            ext.disable()
+        except Exception as e:
+            _t.show_warning(self, "结束失败", str(e))
+        self._load_ext_engine()
+        self._start_dsh_probe()
+
     # ---------- DeepSeek Harness ----------
     def _start_dsh_probe(self) -> None:
         probe = _DshProbe(self)
@@ -1224,19 +1370,23 @@ class SettingsWindow(QDialog):
             ids = "、".join(st.models[:3])
             if len(st.models) > 3:
                 ids += f" 等 {len(st.models)} 个"
-            # dsh 的 agent 提示约 9.4k tokens：上下文不到 12K 必然爆窗。
-            # 上下文现在是全局档（「模型上下文」那个滑块），不再按模型分流。
+            # dsh 的 agent 提示约 9.4k tokens：上下文不到 16K 必然爆窗
             too_small = any(m.context < _dsh.MIN_USABLE_CONTEXT
                             for m in _dsh.chat_models() if m.id in st.models)
             tail = ""
+            if st.port_mismatch:
+                # 从"共用 18090"改成"独立 18091"之后，旧文件还指着插件那套端口
+                tail += (f"；写进去的地址还是旧端口 {st.base_port}，"
+                         "点一次「接入」切到外部引擎")
             if too_small:
-                tail = (f"；上下文只有 {_ctx_text(config.load_engine_context())}，"
-                        "跑 dsh 会爆窗，把下面「模型上下文」调大")
+                tail += (f"；上下文只有 {_ctx_text(config.load_engine_context())}，"
+                         "跑 dsh 会爆窗，把上面「模型上下文」调大")
             if not st.engine_online:
-                tail += "；本地引擎现在没在跑，dsh 会报 Connection error，把下面那个开关打开"
+                tail += "；外部引擎现在没在跑，dsh 会报 Connection error，把「启用外部引擎」打开"
+            wrong = st.port_mismatch or too_small or not st.engine_online
             self.dsh_hint.setText(
                 f"已接入：{ids}。到 dsh 的模型选择器里选「{_dsh.PROVIDER_NAME}」{tail}")
-            self.dsh_hint.set_color(_t.WARNING if (too_small or not st.engine_online) else None)
+            self.dsh_hint.set_color(_t.WARNING if wrong else None)
             return
         if not st.installed:
             self.dsh_hint.setText(f"没找到 dsh（{st.home}）。装好并跑过一次之后再来接入")
@@ -1277,11 +1427,11 @@ class SettingsWindow(QDialog):
             _t.show_warning(self, "接入失败", f"写文件出错：{exc}")
             return
         self._refresh_dsh_hint()
-        # 接入完就该能用：顺手把常驻引擎打开，否则 dsh 那头必然 Connection error
-        if not config.load_keep_engine():
-            self.keep_engine.setChecked(True)     # 触发 _on_keep_engine：写配置 + 预热
+        # 接入完就该能用：dsh 连的是外部引擎（18091），没开就顺手打开
+        if not config.load_ext_engine():
+            self.ext_engine.setChecked(True)      # 触发 _on_ext_engine：确认 + 预热
         elif not self._dsh_status.engine_online:
-            self._warm_engine()
+            self._warm_external()
 
     def _on_dsh_revert(self) -> None:
         st = _dsh.probe()
@@ -1300,7 +1450,7 @@ class SettingsWindow(QDialog):
             return
         self._refresh_dsh_hint()
 
-    # ---------- 常驻本地引擎 ----------
+    # ---------- 插件引擎常驻 ----------
     def _load_keep_engine(self) -> None:
         """初始化开关显示：blockSignals 避免 setChecked 触发 toggled 重复写配置。"""
         on = config.load_keep_engine()
@@ -1310,12 +1460,22 @@ class SettingsWindow(QDialog):
         self._refresh_keep_engine_hint()
 
     def _refresh_keep_engine_hint(self) -> None:
+        if config.load_ext_engine():
+            self.keep_engine_hint.setText(
+                "外部引擎开着时不预热这一套（显存要留给 dsh）；关掉外部引擎后按需启动")
+            self.keep_engine_hint.set_color(_t.WARNING)
+            return
+        try:
+            from ..engine.manager import EngineManager
+            online = EngineManager.instance().running()
+        except Exception:
+            online = False
         if not config.load_keep_engine():
             self.keep_engine_hint.setText(
-                "未开启 · dsh 要连 127.0.0.1:18090，LyLaunch 没在跑引擎时会连不上")
+                "未开启 · 插件用到模型时临时启动（每次多等一两秒）")
             self.keep_engine_hint.set_color(None)
             return
-        if _dsh.engine_online():
+        if online:
             self.keep_engine_hint.setText(
                 "已开启 · Router 常驻，模型仍按需加载（不加载就不占显存）")
             self.keep_engine_hint.set_color(_t.SUCCESS)
@@ -1326,14 +1486,15 @@ class SettingsWindow(QDialog):
     def _on_keep_engine(self, checked: bool) -> None:
         config.save_keep_engine(checked)
         self._refresh_keep_engine_hint()
-        # 关掉只是不再自动拉起；已在跑的 Router 留给本次运行用（不硬杀，免得打断 dsh）
-        if checked and not _dsh.engine_online():
+        # 关掉只是不再自动拉起；已在跑的 Router 留给本次运行用（不硬杀，免得打断插件）
+        if checked and not config.load_ext_engine():
             self._warm_engine()
 
     def _warm_engine(self) -> None:
+        from ..engine.manager import EngineManager
         self.keep_engine_hint.setText("正在启动本地引擎…")
         self.keep_engine_hint.set_color(None)
-        warm = _EngineWarm(self)
+        warm = _EngineWarm(lambda: EngineManager.instance().start() or True, self)
         warm.done.connect(self._on_engine_warm)
         warm.finished.connect(warm.deleteLater)
         self._engine_warm = warm      # 保住引用：线程跑完前被回收会崩进程
@@ -1341,9 +1502,7 @@ class SettingsWindow(QDialog):
 
     def _on_engine_warm(self, ok: bool) -> None:
         self._refresh_keep_engine_hint()
-        if ok:
-            self._start_dsh_probe()    # 引擎起来了，dsh 提示里的"没在跑"该消掉
-        else:
+        if not ok:
             self.keep_engine_hint.setText(
                 "引擎没起来（端口被占或运行库缺失），看「开发者」页的日志")
             self.keep_engine_hint.set_color(_t.DANGER)

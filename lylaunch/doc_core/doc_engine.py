@@ -193,9 +193,10 @@ def get_engine(data_dir, port: int = DEFAULT_PORT,
 
 
 def shutdown_all() -> None:
-    """停止整个 Router（程序退出 / 全量释放时用）。"""
+    """停止两套 Router（程序退出 / 全量释放时用）。"""
     try:
-        EngineManager.instance().shutdown()
+        from lylaunch.engine import shutdown_all as _shutdown_engines
+        _shutdown_engines()
     except Exception:
         pass
     _ENGINES.clear()

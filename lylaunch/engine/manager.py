@@ -16,9 +16,10 @@ from pathlib import Path
 from . import registry
 from .client import EngineError, ModelNotInstalled, RouterClient
 from .runtime import (bind_kill_on_close_job, kill_tree, memory_mb, pid_alive,
-                      port_health, vram_total_mb)
+                      port_health, port_owner_pid, vram_total_mb)
 
 DEFAULT_PORT = 18090
+EXTERNAL_PORT = 18091     # 外部集成（dsh）那套独立的 Router，见 engine/external.py
 _LOADED_STATES = ("loaded", "running", "ready")
 _FAILED_STATES = ("failed", "error", "error_loading")
 # router 派生的 child llama-server 加载失败时会自己退出，但 router 本体还活着，
@@ -32,7 +33,12 @@ _LOAD_ERROR_MARKS = (
 
 
 class EngineManager:
-    """单例（懒汉式，照抄 PluginManager.instance）。"""
+    """单例（懒汉式，照抄 PluginManager.instance）。
+
+    同一份实现管两套 Router：插件共用的 ``EngineManager``（18090）和给外部工具
+    用的 ``ExternalEngine``（18091，见 engine/external.py）。区别只在构造参数：
+    端口、preset 是不是外部那份、日志/pid 文件名、以及同时驻留几个模型。
+    """
 
     _instance: "EngineManager | None" = None
 
@@ -42,8 +48,12 @@ class EngineManager:
             cls._instance = cls()
         return cls._instance
 
-    def __init__(self) -> None:
-        self.port = DEFAULT_PORT
+    def __init__(self, port: int = DEFAULT_PORT, external: bool = False,
+                 log_name: str = "engine.log", pid_name: str = "engine.pid") -> None:
+        self.port = port
+        self.external = external
+        self._log_name = log_name
+        self._pid_name = pid_name
         self.api_key = ""
         self._proc: subprocess.Popen | None = None
         self._job = None
@@ -77,17 +87,21 @@ class EngineManager:
         return None
 
     def _log_path(self) -> Path:
-        return registry.engine_dir() / "engine.log"
+        return registry.engine_dir() / self._log_name
 
     def _pid_path(self) -> Path:
-        return registry.engine_dir() / "engine.pid"
+        return registry.engine_dir() / self._pid_name
+
+    def _models_max(self) -> int:
+        """外部那套固定只驻留 1 个模型：显存全给 dsh，不做模型间往来切换。"""
+        return 1 if self.external else self.effective_models_max()
 
     def _router_cmd(self, exe: Path) -> list[str]:
-        preset = registry.write_preset()
+        preset = registry.write_preset(external=self.external)
         return [
             str(exe),
             "--models-preset", str(preset),
-            "--models-max", str(self.effective_models_max()),
+            "--models-max", str(self._models_max()),
             "--models-memory-margin", "512",
             "--host", "127.0.0.1", "--port", str(self.port),
             "--no-webui", "--timeout", "3600",
@@ -130,24 +144,6 @@ class EngineManager:
             restarted = True
         return {"changed": after != before, "restarted": restarted, "effective": after}
 
-    def set_engine_context(self, value: int) -> dict:
-        """改上下文窗口：写设置 + 重写 preset；Router 在跑就停掉，下次用时按新值加载。
-
-        返回 {"changed": bool, "restarted": bool, "effective": int}。
-        """
-        from .. import config
-        before = config.load_engine_context()
-        config.save_engine_context(value)
-        after = config.load_engine_context()
-        restarted = False
-        if after != before:
-            registry.write_preset()   # preset 里的 ctx-size 必须与设置同源
-            if port_health(self.port):
-                self.shutdown()       # 已经按旧 ctx 加载的模型不可能热改，只能卸载
-                restarted = True
-        return {"changed": after != before, "restarted": restarted, "effective": after}
-
-
     # ---------------------------------------------------------------- 生命周期
     def start(self, progress=None) -> None:
         """起 router（幂等）。router 本体不加载任何模型，应 1~2 秒内就绪。"""
@@ -155,8 +151,13 @@ class EngineManager:
             if self._proc is not None and self._proc.poll() is None and port_health(self.port):
                 return
             if port_health(self.port):
-                # 已有服务在跑（可能是上次残留）→ 直接复用
-                return
+                # 端口有人应答：只有 pid 文件指向的活进程才算"自己那套"，可以直接复用；
+                # 否则是上一轮遗留的孤儿 —— 复用它等于沿用旧的 preset（改过 ctx 也不生效，
+                # 实测就是这么一直卡在 16K 的）。这里把它清掉，接下来按新 preset 重起。
+                pid = self._read_pid()
+                if pid and pid_alive(pid):
+                    return
+                self._clear_stray()
             try:
                 from .migrate import adopt_legacy
                 adopt_legacy()
@@ -194,6 +195,7 @@ class EngineManager:
     def ensure_model(self, mid: str, progress=None) -> None:
         """确保 mid 成为当前唯一活跃模型；必要时先卸载旧模型。全程串行。"""
         spec = registry.spec_of(mid)
+        self._check_external_exclusive()
         with self._lock:
             # 先查文件再让 router 干活：preset 里 9 个段是「预声明」的，
             # 新装机器一个模型都没下载时，router 会去加载不存在的路径并让子进程崩掉。
@@ -280,9 +282,15 @@ class EngineManager:
                 self.unload(if_model=one)
 
     def shutdown(self) -> None:
-        """退出收口：/T 杀整棵树（router + 所有 child），避免孤儿进程。"""
+        """退出收口：/T 杀整棵树（router + 所有 child），避免孤儿进程。
+
+        ``self._proc`` 为空但 pid 文件里有活进程时也要杀 —— 那种情况是「复用了上一轮
+        常驻的 Router」，只清引用不杀进程会留下一只永远占着端口的老实例（正是
+        "改了 ctx 重启程序还是 16K" 的根因）。
+        """
         with self._lock:
             proc = self._proc
+            pid = proc.pid if proc is not None and proc.poll() is None else self._read_pid()
             self._proc = None
             self._job = None
             self._active = None
@@ -290,14 +298,73 @@ class EngineManager:
                 self._pid_path().unlink()
             except Exception:
                 pass
-            if proc is not None and proc.poll() is None:
-                kill_tree(proc.pid)
-                try:
-                    proc.wait(timeout=8)
-                except Exception:
-                    pass
+            if pid and pid_alive(pid):
+                kill_tree(pid)
+                if proc is not None:
+                    try:
+                        proc.wait(timeout=8)
+                    except Exception:
+                        pass
+
+    def running(self) -> bool:
+        """端口上有没有 Router 在应答（不管是不是本进程拉起的）。"""
+        return port_health(self.port, timeout=0.6)
+
+    def pid(self) -> int:
+        """当前 Router 的 pid：优先自己持有的 Popen，其次 pid 文件；都没有返回 0。"""
+        if self._proc is not None and self._proc.poll() is None:
+            return self._proc.pid
+        pid = self._read_pid()
+        return pid if pid and pid_alive(pid) else 0
+
+    def loaded_ctx(self) -> int:
+        """已加载模型的实际 n_ctx（用来证明"改动真的生效了"）；读不到返回 0。"""
+        try:
+            for item in self.client.models(timeout=1.0):
+                if RouterClient._status_of(item) in _LOADED_STATES:
+                    meta = item.get("meta") or {}
+                    if isinstance(meta, dict) and meta.get("n_ctx"):
+                        return int(meta["n_ctx"])
+        except Exception:
+            return 0
+        return 0
 
     # ---------------------------------------------------------------- 内部
+    def _read_pid(self) -> int:
+        try:
+            return int(self._pid_path().read_text(encoding="utf-8").strip())
+        except Exception:
+            return 0
+
+    def _clear_stray(self) -> None:
+        """清掉占着自己端口、却无法由 pid 文件认领的残留 Router（只认这个端口）。"""
+        stray = port_owner_pid(self.port)
+        if not stray:
+            return
+        kill_tree(stray)
+        t0 = time.time()
+        while time.time() - t0 < 8:
+            if not port_health(self.port, timeout=0.5):
+                return
+            time.sleep(0.3)
+
+    def _check_external_exclusive(self) -> None:
+        """外部引擎开启时，插件这套不许再加载模型（显存要整块留给 dsh）。"""
+        if self.external:
+            return
+        try:
+            from .. import config
+            if not config.load_ext_engine():
+                return
+            from .external import ExternalEngine
+            if not ExternalEngine.instance().running():
+                return
+        except Exception:
+            return
+        raise EngineError(
+            "外部集成正在独占本地模型（设置 → 外部集成）。\n"
+            "要先用翻译 / 文档识别 / 本地 AI，请在那里关掉「启用外部引擎」。")
+
     @staticmethod
     def _safe(cb, *args):
         try:

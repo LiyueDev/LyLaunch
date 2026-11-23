@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..engine import DEFAULT_PORT
+from ..engine import EXTERNAL_PORT
 from ..engine.registry import MODELS, is_installed
 
 
@@ -74,7 +74,9 @@ class Status:
     applied: bool
     models: tuple[str, ...] = ()
     backup: Path | None = None
-    engine_online: bool = False     # 本地 Router 在不在（不在时 dsh 必然 Connection error）
+    engine_online: bool = False     # 外部引擎（18091）在不在：不在 dsh 必然 Connection error
+    base_port: int = 0              # 已写入的 baseURL 端口（0 = 没读到）
+    port_mismatch: bool = False     # 写的是旧端口（例如 18090），需要重新接入
 
 
 # ---------------------------------------------------------------- 路径与模型
@@ -122,12 +124,13 @@ def target_path() -> tuple[Path, str]:
     return settings_path(), "settings"
 
 
-def api_base(port: int = DEFAULT_PORT) -> str:
+def api_base(port: int = EXTERNAL_PORT) -> str:
+    """dsh 该连的地址：外部引擎的独立端口（不是插件那套 18090）。"""
     return f"http://127.0.0.1:{port}{BASE_PATH}"
 
 
-def engine_online(port: int = DEFAULT_PORT, timeout: float = 0.6) -> bool:
-    """本地 Router 在不在。dsh 直连这个端口，不在就是 Connection error。"""
+def engine_online(port: int = EXTERNAL_PORT, timeout: float = 0.6) -> bool:
+    """外部引擎在不在。dsh 直连这个端口，不在就是 Connection error。"""
     try:
         from ..engine import RouterClient
         return bool(RouterClient(port).health(timeout))
@@ -149,9 +152,10 @@ def _as_chat_model(spec) -> ChatModel:
     # dsh 用这个数算 token 预算，报小了会在引擎明明够用的情况下 400。
     from ..engine.registry import effective_ctx
     ctx = effective_ctx(spec)
-    # 输出上限压到上下文的 1/4 并封顶 4096：dsh 的系统提示就要 ~9.4k tokens，
-    # 给生成留太多会在 prompt + 输出撞 n_ctx，直接 400。
-    output = min(max(ctx // 4, 512), 4096)
+    # 输出上限取上下文的 1/4、封顶 8192：dsh 的系统提示 + 工具描述要 ~9.4k tokens，
+    # 给生成留太多会在 prompt + 输出撞 n_ctx（直接 400）；但压到 4096 又会让长回答
+    # 被截断（「已达到输出 token 上限」），所以按窗口大小往上放一档。
+    output = min(max(ctx // 4, 1024), 8192)
     vision = "vision" in spec.caps and bool(spec.mmproj)
     return ChatModel(spec.id, spec.display, ctx, output, vision)
 
@@ -515,6 +519,21 @@ def _provider_model_ids(lines: list[str]) -> list[str]:
     return ids
 
 
+_BASE_PORT_RE = re.compile(r"baseURL:\s*\"?[^\"\n]*:(\d+)")
+
+
+def _written_base_port(lines: list[str]) -> int:
+    """读已写入的 baseURL 端口；读不到返回 0（例如还没接入）。"""
+    for line in lines:
+        m = _BASE_PORT_RE.search(line)
+        if m:
+            try:
+                return int(m.group(1))
+            except ValueError:
+                return 0
+    return 0
+
+
 def probe() -> Status:
     """给设置页显示用的状态；不抛异常，读不到就当没装。"""
     home = dsh_home()
@@ -523,6 +542,7 @@ def probe() -> Status:
     applied = _has_block(lines) or _provider_key_line(lines) >= 0
     models = tuple(_provider_model_ids(lines)) if applied else ()
     bak = backup_of(target)
+    base_port = _written_base_port(lines)
     return Status(
         home=home,
         target=target,
@@ -532,10 +552,12 @@ def probe() -> Status:
         models=models,
         backup=bak if bak.is_file() else None,
         engine_online=engine_online(),
+        base_port=base_port,
+        port_mismatch=bool(applied and base_port and base_port != EXTERNAL_PORT),
     )
 
 
-def apply(models: list[ChatModel] | None = None, port: int = DEFAULT_PORT) -> Status:
+def apply(models: list[ChatModel] | None = None, port: int = EXTERNAL_PORT) -> Status:
     """写入 / 刷新 provider 段落。只动自己那段，返回写后的状态。"""
     picked = list(models) if models is not None else chat_models()
     if not picked:

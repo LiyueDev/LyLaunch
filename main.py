@@ -163,10 +163,11 @@ def main() -> int:
     _install_tooltip_blocker(app)   # 全程序禁用 hover 解释气泡
 
     # 全局推理引擎（llama.cpp Router）：懒启动（此处只构造，不 spawn）；
-    # 退出时统一收口，保证 router + 所有模型 child 被清理（含右键退出/异常退出）。
-    from lylaunch.engine import EngineManager
+    # 退出时统一收口，保证两套 router + 所有模型 child 被清理（含右键退出/异常退出）。
+    from lylaunch.engine import EngineManager, ExternalEngine, shutdown_all
     _engine_mgr = EngineManager.instance()
-    app.aboutToQuit.connect(_engine_mgr.shutdown)
+    _ext_mgr = ExternalEngine.instance()
+    app.aboutToQuit.connect(shutdown_all)
 
     # 字体兜底：Qt 在 Windows 上的默认字体链会落到 MS Sans Serif / Fixedsys
     # 这类旧点阵字体 —— 它们名字能解析、但 DirectWrite 画不出来，于是反复打印
@@ -212,11 +213,21 @@ def main() -> int:
     _dbg_print("[LyLaunch] MainWindow 构造完成。", flush=True)
     window.show_requested.connect(window.show_window)
 
-    # 外部工具（dsh）直连 127.0.0.1:18090，引擎不在就没人应答；
-    # 开了「保持本地引擎运行」就在启动后预热 Router（空壳，不加载模型）。
-    if config.load_keep_engine():
-        import threading
+    # 外部工具（dsh）直连外部引擎 127.0.0.1:18091，不在就没人应答。
+    # 开了「启用外部引擎」就预热那套（独立进程，插件那套不必跟着起）；
+    # 没开外部引擎、但勾了「保持本地引擎运行」时，按老规矩预热插件那套。
+    import threading
 
+    if config.load_ext_engine():
+        def _warm_external() -> None:
+            try:
+                _ext_mgr.enable()
+                _dbg_print("[LyLaunch] 外部引擎已就绪。", flush=True)
+            except Exception as exc:      # 起不来不影响主程序，设置页会提示
+                _dbg_print(f"[LyLaunch] 外部引擎启动失败：{exc}", flush=True)
+
+        threading.Thread(target=_warm_external, name="engine-ext-warm", daemon=True).start()
+    elif config.load_keep_engine():
         def _warm_engine() -> None:
             try:
                 _engine_mgr.start()

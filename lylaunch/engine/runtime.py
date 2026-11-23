@@ -161,6 +161,48 @@ def port_health(port: int, timeout: float = 2) -> bool:
         return False
 
 
+def port_owner_pid(port: int) -> int:
+    """谁在监听这个端口（LISTENING 那条记录的 pid）；查不到返回 0。
+
+    只在「端口有人应答、但 pid 文件对不上」时用来认领残留实例，平时用不到。
+    走系统自带的 netstat，不引第三方依赖（打包后也要能跑）。
+    """
+    try:
+        raw = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                             capture_output=True, timeout=8,
+                             creationflags=0x08000000).stdout or b""
+        # 中文系统的 netstat 输出是 GBK，别用 text=True 让解码崩掉整段结果。
+        # 要解析的部分（地址、冒号、数字）都是 ASCII，按 GBK 解不会错。
+        out = raw.decode("gbk", "replace")
+    except Exception:
+        return 0
+    needle = f":{port}"
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 5 or "LISTEN" not in parts[3].upper():
+            continue
+        if needle not in parts[1]:
+            continue
+        try:
+            return int(parts[4])
+        except ValueError:
+            continue
+    return 0
+
+
+def process_image_name(pid: int) -> str:
+    """进程映像名（只用于提示里说清"是谁占着端口"）；查不到返回空串。"""
+    try:
+        raw = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, timeout=8,
+                             creationflags=0x08000000).stdout or b""
+        out = raw.decode("gbk", "replace")
+        name = out.strip().split(",")[0].strip('"')
+        return name if name and name.upper() != "INFO:" else ""
+    except Exception:
+        return ""
+
+
 # ---------------------------------------------------------------- 显存
 _VRAM_CACHE: int | None = None
 

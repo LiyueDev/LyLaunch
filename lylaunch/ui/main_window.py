@@ -2793,10 +2793,10 @@ class MainWindow(QWidget):
             self.clipboard.deleteLater()
         except Exception:
             pass
-        # 双保险：显式停掉 Router（aboutToQuit 也会调，shutdown 幂等）
+        # 双保险：显式停掉两套 Router（aboutToQuit 也会调，shutdown 幂等）
         try:
-            from lylaunch.engine import EngineManager
-            EngineManager.instance().shutdown()
+            from lylaunch.engine import shutdown_all
+            shutdown_all()
         except Exception:
             pass
         QApplication.quit()
