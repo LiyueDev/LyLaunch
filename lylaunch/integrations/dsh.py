@@ -554,10 +554,26 @@ def _written_ctx(lines: list[str]) -> int:
     return min(found) if found else 0
 
 
-def _expected_ctx() -> int:
-    """滑块档位对应的窗口：写进 dsh 的那个数应该跟它一致。"""
-    models = chat_models()
-    return models[0].context if models else 0
+def _ctx_mismatch(lines: list[str]) -> bool:
+    """逐模型比对已写入的 contextWindow 与当前该有的值。
+
+    只看最小值不够：滑块从 64K 拉到 112K 后，9B 应该变 112K、VL 仍被封在 64K，
+    此时「最小值」前后都是 64K，差异会被吞掉。这里按 id 一个一个对。
+    """
+    want = {m.id: m.context for m in chat_models()}
+    if not want:
+        return False
+    start, stop = _own_range(lines)
+    cur_id = ""
+    for line in lines[start:stop]:
+        s = line.strip()
+        if s.startswith("- id:"):
+            cur_id = s.split(":", 1)[1].strip().strip('"')
+            continue
+        m = _CTX_RE.search(line)
+        if m and cur_id in want and int(m.group(1)) != want[cur_id]:
+            return True
+    return False
 
 
 def probe() -> Status:
@@ -570,7 +586,6 @@ def probe() -> Status:
     bak = backup_of(target)
     base_port = _written_base_port(lines)
     base_ctx = _written_ctx(lines)
-    want_ctx = _expected_ctx()
     return Status(
         home=home,
         target=target,
@@ -583,7 +598,7 @@ def probe() -> Status:
         base_port=base_port,
         port_mismatch=bool(applied and base_port and base_port != EXTERNAL_PORT),
         base_ctx=base_ctx,
-        ctx_mismatch=bool(applied and base_ctx and want_ctx and base_ctx != want_ctx),
+        ctx_mismatch=bool(applied and _ctx_mismatch(lines)),
     )
 
 

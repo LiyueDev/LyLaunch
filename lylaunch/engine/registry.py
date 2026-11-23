@@ -52,6 +52,8 @@ class ModelDef:
     ngl: int = 99
     jinja: bool = True
     reasoning: str = ""           # "" | "deepseek" → reasoning-format
+    ctx_max: int = 0              # 外部集成（长上下文）下的硬上限；0 = 跟随全局滑块
+    kv_cache: str = ""            # "" | "q8_0" | "q4_0"：压 KV 换上下文，只用于外部那套
     # 请求默认采样（进请求体，不进 INI）
     sampling: dict = field(default_factory=dict)
     # 能力与文案
@@ -196,6 +198,9 @@ MODELS: list[ModelDef] = [
         mmproj="mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf", mmproj_size=717 * 1048576,
         repos=("Qwen/Qwen3-VL-8B-Instruct-GGUF",),
         ctx=8192, ngl=99, jinja=True,
+        # 112K 下 KV 要 16GB，12GB 卡直接 OOM（loader 报 failed to load）；
+        # q8_0 压 KV 后 64K 实测可加载，96K 仍超。给它单独封顶，别跟着全局滑块一起炸。
+        ctx_max=65536, kv_cache="q8_0",
         sampling={"temperature": 0.7, "max_tokens": 1024},
         caps=("vision", "chat"),
         note="能看图 · 文档/表格/截图理解，需 12GB 显存",
@@ -349,9 +354,15 @@ def effective_ctx(spec: ModelDef, external: bool = False) -> int:
     if external:
         try:
             from .. import config
-            return int(config.load_engine_context())
+            ctx = int(config.load_engine_context())
         except Exception:
             return int(spec.ctx)
+        # 全局档位由用户按显存拉，但每个模型的 KV 开销差得远：VL-8B 每 token
+        # 约 140KB，112K 就要 16GB。这里按模型自己的天花板截一刀，避免「设了大
+        # 上下文，结果把某个模型加载成 OOM」——那种 500 报错离原因很远，极难查。
+        if spec.ctx_max:
+            return min(ctx, int(spec.ctx_max))
+        return ctx
     return int(spec.ctx)
 
 
@@ -379,6 +390,11 @@ def render_preset(external: bool = False) -> str:
         lines.append(f"ctx-size = {effective_ctx(spec, external)}")
         lines.append(f"n-gpu-layers = {spec.ngl}")
         lines.append(f"jinja = {'true' if spec.jinja else 'false'}")
+        # KV 量化只给外部那套用：插件（翻译 / OCR / 本地 AI）窗口本来就小，
+        # 压 KV 换不来空间，只会平白引入精度风险。
+        if external and spec.kv_cache:
+            lines.append(f"cache-type-k = {spec.kv_cache}")
+            lines.append(f"cache-type-v = {spec.kv_cache}")
         if spec.reasoning:
             lines.append(f"reasoning-format = {spec.reasoning}")
         lines.append("load-on-startup = false")
