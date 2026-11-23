@@ -10,13 +10,13 @@ import os
 from ctypes.wintypes import MSG
 from PySide6.QtCore import (
     Qt, QAbstractNativeEventFilter, QCoreApplication, QRect, QSize, Signal,
-    QPropertyAnimation, QEasingCurve, QPointF, QRectF, QThread,
+    QPropertyAnimation, QEasingCurve, QPointF, QRectF, QThread, QTimer,
 )
 from PySide6.QtGui import QKeyEvent, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QStackedWidget, QButtonGroup, QWidget, QFrame,
-    QApplication, QGraphicsOpacityEffect,
+    QApplication, QGraphicsOpacityEffect, QSlider,
 )
 
 from .. import autostart, build_info, config, hotkey, reset
@@ -70,6 +70,22 @@ _DANGER_QSS = (f"QPushButton{{background:{_t.DANGER_SOFT}; color:{_t.DANGER};"
                f" QPushButton:hover{{background:#FBDDD9;}}"
                f" QPushButton:disabled{{color:{_t.TEXT_SECONDARY};"
                f" background:{_t.BG_SUBTLE}; border-color:{_t.BORDER};}}")
+# 上下文滑块：细轨 + 蓝色已填充段 + 圆点滑块，和开关/胶囊同一套观感。
+# 轨道高度必须与 sub-page 一致，否则 groove 与 sub-page 对不齐（QSS 的老毛病）。
+_SLIDER_QSS = (
+    f"QSlider::groove:horizontal{{height:4px; background:{_t.BORDER};"
+    f" border-radius:2px;}}"
+    f" QSlider::sub-page:horizontal{{height:4px; background:{_t.ACCENT};"
+    f" border-radius:2px;}}"
+    f" QSlider::handle:horizontal{{width:14px; height:14px; margin:-5px 0;"
+    f" background:#FFFFFF; border:1px solid {_t.ACCENT}; border-radius:7px;}}"
+    f" QSlider::handle:horizontal:hover{{background:{_t.BG_SUBTLE};}}"
+    f" QSlider::handle:horizontal:disabled{{border-color:{_t.TEXT_PLACEHOLDER};}}")
+
+
+def _ctx_text(n: int) -> str:
+    """上下文读数：8192 → 8K（内部一律按字节数算，见 config.ENGINE_CONTEXT_STEPS）。"""
+    return f"{n // 1024}K"
 
 
 def _size_text(n: int) -> str:
@@ -139,6 +155,9 @@ def _nav_icon(kind: str, color: str) -> QIcon:
             p.drawLine(QPointF(t, 11.4), QPointF(t, 13.6))
             p.drawLine(QPointF(2.4, t), QPointF(4.6, t))
             p.drawLine(QPointF(11.4, t), QPointF(13.6, t))
+    elif kind == "integrations":            # 双环相扣（对接）
+        for cx in (5.4, 10.6):              # 两个圆角环横向相扣，读作"链接/对接"
+            p.drawRoundedRect(QRectF(cx - 3.6, 5.2, 7.2, 5.6), 2.8, 2.8)
     elif kind == "search":                  # 放大镜
         p.drawEllipse(QPointF(7.0, 7.0), 4.6, 4.6)
         p.drawLine(QPointF(10.4, 10.4), QPointF(13.6, 13.6))
@@ -373,9 +392,11 @@ class SettingsWindow(QDialog):
         _avail = _scr.availableGeometry().height() if _scr else 0
         _h = 620 if not _avail else max(560, min(620, _avail - 100))
         self.setFixedSize(900, _h)
+        # 不要 WindowStaysOnTopHint：设置页是 ApplicationModal，只要它开着就没人动得了
+        # 主窗口，再叠一层"永远置顶"只会让它死死压在其他应用（浏览器、dsh 本体）上面，
+        # 用户切过去看一眼 dsh 的输出都做不到。主窗口在打开设置时已 hide()，不会盖回来。
         self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.WindowTitleHint
+            Qt.WindowType.WindowTitleHint
             | Qt.WindowType.WindowCloseButtonHint
             | Qt.WindowType.WindowSystemMenuHint
         )
@@ -520,7 +541,8 @@ class SettingsWindow(QDialog):
     def _nav_items(self) -> list[tuple[str, str]]:
         """导航项顺序即分页顺序。"""
         return [("general", "通用"), ("hotkeys", "快捷键"), ("plugins", "插件"),
-                ("models", "本地模型"), ("search", "搜索"), ("data", "数据与存储"),
+                ("models", "本地模型"), ("integrations", "外部集成"),
+                ("search", "搜索"), ("data", "数据与存储"),
                 ("about", "关于"), ("dev", "开发者")]
 
     # ---------- 切页 ----------
@@ -596,27 +618,10 @@ class SettingsWindow(QDialog):
             self.skin_hint = self._hint_label(col, wide=True)
             self._refresh_skin_hint()
 
-            # 外部集成：把本地模型写成 dsh 的自定义模型提供商（只动自己那一段）
-            cv4 = self._group(lay, "外部集成")
-            self.dsh_apply_btn = self._ghost_button("接入", self._on_dsh_apply)
-            self.dsh_revert_btn = self._ghost_button("撤销", self._on_dsh_revert)
-            col = self._row(cv4, "DeepSeek Harness",
-                            "把本地模型注册成 dsh 的自定义模型提供商",
-                            self._controls(self.dsh_apply_btn, self.dsh_revert_btn),
-                            wide_hint=True)
-            self.dsh_hint = self._hint_label(col, wide=True)
-            self._refresh_dsh_hint()
-
-            # dsh 直接打 127.0.0.1:18090：LyLaunch 没在跑引擎就必然 Connection error。
-            # 常驻的只是 Router 空壳，模型仍按需加载（不加载就不占显存）。
-            self.keep_engine = SwitchButton()
-            self.keep_engine.toggled.connect(self._on_keep_engine)
-            col = self._row(cv4, "保持本地引擎运行",
-                            "dsh 这类外部工具要连本机端口；开了之后引擎随程序启动，平时不加载模型",
-                            self.keep_engine, divider=True, wide_hint=True)
-            self.keep_engine_hint = self._hint_label(col, wide=True)
-            self._load_keep_engine()
-            self._start_dsh_probe()
+        elif key == "integrations":
+            self._page_title(lay, "外部集成",
+                             "把本地模型开放给本机的其他工具（目前支持 DeepSeek Harness）")
+            self._build_integrations_page(lay)
 
         elif key == "hotkeys":
             self._page_title(lay, "快捷键", "全局唤起与截图组合键")
@@ -1050,6 +1055,150 @@ class SettingsWindow(QDialog):
             main.apply_win_skin(value)
         self._refresh_skin_hint()
 
+    # ---------- 外部集成（独立页） ----------
+    def _build_integrations_page(self, lay: QVBoxLayout) -> None:
+        """DeepSeek Harness 接入 + 上下文窗口。
+
+        两件事放一页，是因为它们必须成对配：接入只写 dsh 那边的 provider，
+        上下文写的是引擎 preset 的 ctx-size；上下文给不够，接上了也一定 400
+        （dsh 的系统提示 + 工具描述约 9.4K tokens）。
+        """
+        cv = self._group(lay, "DeepSeek Harness")
+        self.dsh_apply_btn = self._ghost_button("接入", self._on_dsh_apply)
+        self.dsh_revert_btn = self._ghost_button("撤销", self._on_dsh_revert)
+        col = self._row(cv, "接入到 dsh",
+                        "把本地模型注册成 dsh 的自定义模型提供商",
+                        self._controls(self.dsh_apply_btn, self.dsh_revert_btn),
+                        wide_hint=True)
+        self.dsh_hint = self._hint_label(col, wide=True)
+        self._refresh_dsh_hint()
+
+        # dsh 直接打 127.0.0.1:18090：LyLaunch 没在跑引擎就必然 Connection error。
+        # 常驻的只是 Router 空壳，模型仍按需加载（不加载就不占显存）。
+        self.keep_engine = SwitchButton()
+        self.keep_engine.toggled.connect(self._on_keep_engine)
+        col = self._row(cv, "保持本地引擎运行",
+                        "dsh 这类外部工具要连本机端口；开了之后引擎随程序启动，平时不加载模型",
+                        self.keep_engine, divider=True, wide_hint=True)
+        self.keep_engine_hint = self._hint_label(col, wide=True)
+        self._load_keep_engine()
+
+        cv2 = self._group(lay, "上下文窗口")
+        self.ctx_value = self._pill(_ctx_text(config.load_engine_context()))
+        self.ctx_slider = QSlider(Qt.Orientation.Horizontal)
+        self.ctx_slider.setFixedWidth(188)
+        self.ctx_slider.setRange(0, len(config.ENGINE_CONTEXT_STEPS) - 1)
+        self.ctx_slider.setSingleStep(1)
+        self.ctx_slider.setPageStep(1)
+        self.ctx_slider.setStyleSheet(_SLIDER_QSS)
+        self.ctx_slider.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ctx_slider.valueChanged.connect(self._on_ctx_slide)
+        self.ctx_slider.sliderReleased.connect(self._commit_engine_ctx)
+        # 拖完才落盘并重启：拖动过程每挪一档就重启一次引擎，机器会卡成幻灯片
+        self._ctx_timer = QTimer(self)
+        self._ctx_timer.setSingleShot(True)
+        self._ctx_timer.setInterval(400)
+        self._ctx_timer.timeout.connect(self._commit_engine_ctx)
+        col = self._row(cv2, "模型上下文",
+                        "dsh 的系统提示和工具描述就要约 9.4K tokens，给少了会话直接 400",
+                        self._controls(self.ctx_slider, self.ctx_value),
+                        wide_hint=True)
+        self.ctx_hint = self._hint_label(col, wide=True)
+        self._load_engine_ctx()
+
+        self._start_dsh_probe()
+
+    def _load_engine_ctx(self) -> None:
+        """滑块对齐到已保存的档位（不触发 valueChanged，避免误判成用户改动）。"""
+        idx = config.engine_context_index(config.load_engine_context())
+        self.ctx_slider.blockSignals(True)
+        self.ctx_slider.setValue(idx)
+        self.ctx_slider.blockSignals(False)
+        self._refresh_ctx_hint()
+
+    def _on_ctx_slide(self, idx: int) -> None:
+        """拖动过程中只更新读数，停手 400ms 后再落盘（见 _ctx_timer）。"""
+        self.ctx_value.setText(_ctx_text(config.engine_context_value(idx)))
+        self._ctx_timer.start()
+
+    def _commit_engine_ctx(self) -> None:
+        """把滑块当前档位写进设置：preset 的 ctx-size 与 dsh 的 contextWindow 一起改。"""
+        self._ctx_timer.stop()
+        value = config.engine_context_value(self.ctx_slider.value())
+        if value == config.load_engine_context():
+            self._refresh_ctx_hint()
+            return
+
+        from ..engine.manager import EngineManager
+        from ..engine.runtime import port_health
+        try:
+            mgr = EngineManager.instance()
+        except Exception as e:
+            _t.show_warning(self, "设置失败", f"读取引擎状态失败：{e}")
+            self._load_engine_ctx()
+            return
+
+        running = False
+        try:
+            running = port_health(mgr.port, timeout=0.6)
+        except Exception:
+            running = False
+        if running:
+            if not _t.ask_confirm(
+                self, "需要重启本地引擎",
+                f"上下文改成 {_ctx_text(value)} 之后要重启本地推理引擎，"
+                "当前已加载的模型会被卸载。\n\n"
+                "大上下文更吃显存：9B 模型 16K 约 7.5GB，再翻倍就是 KV cache 也翻倍。\n\n"
+                "下次打开翻译 / 文档识别 / 本地 AI 时会按新值重新加载，不用手动处理。\n\n"
+                "确定修改吗？",
+                yes_text="修改并重启", no_text="算了",
+            ):
+                self._load_engine_ctx()
+                return
+
+        try:
+            res = mgr.set_engine_context(value)
+        except Exception as e:
+            _t.show_warning(self, "设置失败", f"写入引擎设置失败：{e}")
+            self._load_engine_ctx()
+            return
+
+        # dsh 那边的 contextWindow 也得跟着改，否则它按旧值算预算照样 400
+        self._resync_dsh_context()
+        self._refresh_ctx_hint()
+        if res.get("restarted"):
+            self.ctx_hint.setText(self.ctx_hint.text() + "\n引擎已重启，设置已生效。")
+            # 重启等于把 Router 停掉了：开着常驻就顺手拉回来，否则 dsh 立刻 Connection error
+            if config.load_keep_engine():
+                self._warm_engine()
+
+    def _resync_dsh_context(self) -> None:
+        """上下文变了就把已接入的 dsh provider 段重写一遍（没接入就什么都不做）。"""
+        st = getattr(self, "_dsh_status", None)
+        if st is None or not st.applied:
+            return
+        try:
+            self._dsh_status = _dsh.apply(_dsh.chat_models())
+        except Exception:   # noqa: BLE001 —— 接入状态原本就正常，同步失败不该打断设置流程
+            pass
+        self._refresh_dsh_hint()
+
+    def _refresh_ctx_hint(self) -> None:
+        """说清楚这个值意味着什么：够不够跑 dsh、显存上要不要谨慎。"""
+        value = config.load_engine_context()
+        self.ctx_value.setText(_ctx_text(value))
+        if value < _dsh.MIN_USABLE_CONTEXT:
+            # dsh 的提示就要 ~9.4K，再小的档配上输出预算只剩几百 token 余量
+            tail = f"跑 dsh 会爆窗，至少给到 {_ctx_text(_dsh.MIN_USABLE_CONTEXT)}"
+            self.ctx_hint.set_color(_t.WARNING)
+        elif value == _dsh.MIN_USABLE_CONTEXT:
+            tail = "跑 dsh 够用（提示占 9.4K，剩下约 7K 给对话）"
+            self.ctx_hint.set_color(None)
+        else:
+            tail = "更长对话也装得下；显存吃紧就往下调一档"
+            self.ctx_hint.set_color(None)
+        self.ctx_hint.setText(f"当前 {_ctx_text(value)} · {tail}")
+
     # ---------- DeepSeek Harness ----------
     def _start_dsh_probe(self) -> None:
         probe = _DshProbe(self)
@@ -1075,17 +1224,19 @@ class SettingsWindow(QDialog):
             ids = "、".join(st.models[:3])
             if len(st.models) > 3:
                 ids += f" 等 {len(st.models)} 个"
-            # dsh 的 agent 提示约 9.4k tokens：上下文不到 12K 的模型必然爆窗
-            tight = [m.id for m in _dsh.chat_models()
-                     if m.id in st.models and m.context < _dsh.MIN_USABLE_CONTEXT]
+            # dsh 的 agent 提示约 9.4k tokens：上下文不到 12K 必然爆窗。
+            # 上下文现在是全局档（「模型上下文」那个滑块），不再按模型分流。
+            too_small = any(m.context < _dsh.MIN_USABLE_CONTEXT
+                            for m in _dsh.chat_models() if m.id in st.models)
             tail = ""
-            if tight:
-                tail = f"；{'、'.join(tight)} 的上下文太小，跑 dsh 会爆窗，换 16K 以上的模型"
+            if too_small:
+                tail = (f"；上下文只有 {_ctx_text(config.load_engine_context())}，"
+                        "跑 dsh 会爆窗，把下面「模型上下文」调大")
             if not st.engine_online:
                 tail += "；本地引擎现在没在跑，dsh 会报 Connection error，把下面那个开关打开"
             self.dsh_hint.setText(
                 f"已接入：{ids}。到 dsh 的模型选择器里选「{_dsh.PROVIDER_NAME}」{tail}")
-            self.dsh_hint.set_color(_t.WARNING if (tight or not st.engine_online) else None)
+            self.dsh_hint.set_color(_t.WARNING if (too_small or not st.engine_online) else None)
             return
         if not st.installed:
             self.dsh_hint.setText(f"没找到 dsh（{st.home}）。装好并跑过一次之后再来接入")

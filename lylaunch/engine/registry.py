@@ -330,6 +330,22 @@ def model_files_problem(spec: ModelDef) -> str:
 
 
 # ---------------------------------------------------------------- preset INI
+def effective_ctx(spec: ModelDef) -> int:
+    """该模型实际使用的上下文窗口：用户在「外部集成」页选的全局档。
+
+    出厂值（spec.ctx）只是各模型自己的默认，不做上限——用户为了让 dsh 这类
+    外部工具跑得动而统一调大时，工厂默认会把请求挡回去（9B 的 16K 上限根本
+    放不下 dsh 约 9.4K 的系统提示 + 4096 output）。preset 与 dsh 的
+    contextWindow 必须同取这一个数，否则引擎按 32K 加载、dsh 按 16K 算预算，
+    请求还是会被拒。
+    """
+    try:
+        from .. import config
+        return int(config.load_engine_context())
+    except Exception:
+        return int(spec.ctx)
+
+
 def render_preset() -> str:
     """生成 --models-preset 的 INI。
 
@@ -351,7 +367,7 @@ def render_preset() -> str:
         mp = mmproj_path(spec)
         if mp is not None:
             lines.append(f"mmproj = {mp}")
-        lines.append(f"ctx-size = {spec.ctx}")
+        lines.append(f"ctx-size = {effective_ctx(spec)}")
         lines.append(f"n-gpu-layers = {spec.ngl}")
         lines.append(f"jinja = {'true' if spec.jinja else 'false'}")
         if spec.reasoning:

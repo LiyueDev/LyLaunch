@@ -43,8 +43,9 @@ _MARK_TAIL = "<<< LyLaunch 本地模型 <<<"
 _BEGIN = f"# {_MARK_HEAD}：本段由 LyLaunch 维护，重新接入会覆盖，撤销会删除 >>>"
 _END = f"# {_MARK_TAIL}"
 
-# dsh 的 agent 系统提示 + 工具描述约 9.4k tokens；低于这个窗口的模型跑不动
-MIN_USABLE_CONTEXT = 12000
+# dsh 的 agent 系统提示 + 工具描述约 9.4k tokens，还要留出 maxTokens 的位置：
+# 12K 窗口只剩几百 token 余量，实际一聊就 400，16K 才算跑得动。
+MIN_USABLE_CONTEXT = 16384
 
 
 class DshError(RuntimeError):
@@ -144,11 +145,15 @@ def chat_models() -> list[ChatModel]:
 
 
 def _as_chat_model(spec) -> ChatModel:
+    # 上下文取引擎实际加载的那个数（设置页的全局档），不是模型出厂值：
+    # dsh 用这个数算 token 预算，报小了会在引擎明明够用的情况下 400。
+    from ..engine.registry import effective_ctx
+    ctx = effective_ctx(spec)
     # 输出上限压到上下文的 1/4 并封顶 4096：dsh 的系统提示就要 ~9.4k tokens，
     # 给生成留太多会在 prompt + 输出撞 n_ctx，直接 400。
-    output = min(max(spec.ctx // 4, 512), 4096)
+    output = min(max(ctx // 4, 512), 4096)
     vision = "vision" in spec.caps and bool(spec.mmproj)
-    return ChatModel(spec.id, spec.display, spec.ctx, output, vision)
+    return ChatModel(spec.id, spec.display, ctx, output, vision)
 
 
 # ---------------------------------------------------------------- 文本渲染

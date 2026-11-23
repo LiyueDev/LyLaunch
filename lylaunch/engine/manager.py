@@ -130,6 +130,23 @@ class EngineManager:
             restarted = True
         return {"changed": after != before, "restarted": restarted, "effective": after}
 
+    def set_engine_context(self, value: int) -> dict:
+        """改上下文窗口：写设置 + 重写 preset；Router 在跑就停掉，下次用时按新值加载。
+
+        返回 {"changed": bool, "restarted": bool, "effective": int}。
+        """
+        from .. import config
+        before = config.load_engine_context()
+        config.save_engine_context(value)
+        after = config.load_engine_context()
+        restarted = False
+        if after != before:
+            registry.write_preset()   # preset 里的 ctx-size 必须与设置同源
+            if port_health(self.port):
+                self.shutdown()       # 已经按旧 ctx 加载的模型不可能热改，只能卸载
+                restarted = True
+        return {"changed": after != before, "restarted": restarted, "effective": after}
+
 
     # ---------------------------------------------------------------- 生命周期
     def start(self, progress=None) -> None:

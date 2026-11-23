@@ -216,6 +216,45 @@ def save_models_max(value: str) -> None:
                      else DEFAULT_ENGINE_MODELS_MAX})
 
 
+# 单个模型的上下文窗口（--ctx-size，也同步给 dsh 的 contextWindow）。
+# 8K 跑不动 dsh：它的系统提示 + 工具描述约 9.4K tokens，光提示就超了。
+# 档位偏保守：9B 模型 16K 约 7.5GB 显存，再往上 KV cache 是翻倍的。
+ENGINE_CONTEXT_STEPS = (8192, 12288, 16384, 24576, 32768, 49152, 65536)
+DEFAULT_ENGINE_CONTEXT = 16384
+ENGINE_CONTEXT_MIN = ENGINE_CONTEXT_STEPS[0]
+ENGINE_CONTEXT_MAX = ENGINE_CONTEXT_STEPS[-1]
+
+
+def engine_context_index(value: int | None = None) -> int:
+    """把上下文值夹到最近的档位上，返回档位序号（给滑块的 value 用）。"""
+    v = DEFAULT_ENGINE_CONTEXT if value is None else int(value)
+    best = min(range(len(ENGINE_CONTEXT_STEPS)),
+               key=lambda i: abs(ENGINE_CONTEXT_STEPS[i] - v))
+    return best
+
+
+def engine_context_value(index: int) -> int:
+    """档位序号 → 实际上下文长度。"""
+    i = max(0, min(len(ENGINE_CONTEXT_STEPS) - 1, int(index)))
+    return ENGINE_CONTEXT_STEPS[i]
+
+
+def load_engine_context() -> int:
+    """读上下文窗口；没设置过或脏值，一律按默认档。"""
+    raw = load_engine_cfg().get("ctx_size")
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_ENGINE_CONTEXT
+    i = engine_context_index(v)
+    return ENGINE_CONTEXT_STEPS[i]
+
+
+def save_engine_context(value: int) -> None:
+    save_engine_cfg({"ctx_size": engine_context_value(engine_context_index(value))})
+
+
+
 # ---------- 首页瓦片手动顺序（应用 / 系统应用） ----------
 def load_tile_order(group: str) -> list[str]:
     """某个首页区块被拖出来的顺序（存 path 列表）；没排过返回空表。"""
