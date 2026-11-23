@@ -2,9 +2,9 @@
 
 <img src="brand/icon-256.png" width="96" alt="LyLaunch">
 
-# LyLaunch · 轻快启动
+# LyLaunch · 轻启
 
-**一个热键唤起的极简 Windows 启动器：搜应用、翻剪贴板、开插件，纯本地不上传**
+**一个热键唤起的 Windows 启动器**
 
 Python · PySide6 · Windows 原生 API · Apache-2.0
 
@@ -14,15 +14,19 @@ Python · PySide6 · Windows 原生 API · Apache-2.0
   <img src="doc/screenshots/main.png" width="100%" alt="LyLaunch 主浮窗：上面搜应用，中间是插件，下面是应用">
 </p>
 
-**装起来三行**：`git clone https://github.com/LiyueDev/LyLaunch.git` → `pip install -r requirements.txt` → `python main.py`，然后按 `Alt+Space`（需要 Windows 10/11 + Python 3.10–3.14，细节见[快速开始](#快速开始)）
+- **快** —— `Alt+Space` 一按就开，打两个字母就命中
+- **模型** —— 模型跑在你机器上，插件都能用，不联网
+- **插件** —— 缺什么，写一个目录就有
+
+`wx` 就是微信，不用切输入法。
+
+装起来三行：`git clone https://github.com/LiyueDev/LyLaunch.git` → `pip install -r requirements.txt` → `python main.py`，然后按 `Alt+Space`（Windows 10/11 + Python 3.10–3.14，细节见[快速开始](#快速开始)）
 
 ---
 
 ## 这是什么
 
 按一下热键，浮窗弹出，输入拼音首字母就能打开本机任意应用或文件；再按 `Esc` 收起。它常驻托盘，像一个更轻的 uTools —— 没有账号、没有云同步、不联网也能用。
-
-**从 0.1 迭代到 1.2.2**：核心 53 个模块、13,000+ 行，加上 9 个内置插件共 32,000+ 行 Python。纯本地运行，无账号、无云同步。
 
 **能让本地模型给别人用**：1.2.2 起有一套独立的外部集成 Router（`127.0.0.1:18091`），一个开关把 llama.cpp 的显存整块让给 DeepSeek Harness 这类本机 agent，关掉就又回到插件自己用。不启用时零网络请求。
 
@@ -86,6 +90,8 @@ python main.py
 | 离线翻译 | `ctranslate2` + `sentencepiece` | 本地推理，不联网 |
 | OCR | `rapidocr` 3.x（PP-OCRv6） | 纯离线，模型随包 |
 | 本地推理 | llama.cpp Router | 单进程常驻，插件共享一个 `127.0.0.1:18090` |
+
+**规模**：核心 53 个模块、13,000+ 行，加上 9 个内置插件共 32,000+ 行 Python。从 0.1 迭代到 1.2.2。
 
 ## 项目结构
 
