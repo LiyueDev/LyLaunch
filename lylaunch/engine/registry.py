@@ -209,11 +209,11 @@ MODELS: list[ModelDef] = [
         file="Qwen3.5-9B-DeepSeek-V4-Flash-Q4_K_M.gguf", size=5368 * 1048576,
         mmproj="mmproj.gguf", mmproj_size=879 * 1048576,
         repos=("Jackrong/Qwen3.5-9B-DeepSeek-V4-Flash-GGUF",),
-        ctx=8192, ngl=99, jinja=True, reasoning="deepseek",
+        ctx=16384, ngl=99, jinja=True, reasoning="deepseek",
         sampling={"temperature": 0.7, "max_tokens": 1024},
         caps=("vision", "chat", "thinking"),
         note="底座 Qwen3.5-9B，用 DeepSeek-V4-Flash 推理数据训练；会思考、也能看图",
-        vram="约 6.9GB 显存",
+        vram="约 7.5GB 显存（16K 上下文）",
         legacy_dirs=("models/qwen35-9b-v4-distill/models",),
     ),
     ModelDef(

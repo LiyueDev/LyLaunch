@@ -46,7 +46,7 @@ class _SafeQApplication(QApplication):
             traceback.print_exc()
             return True
 
-from lylaunch import single_instance, tray, paths
+from lylaunch import config, single_instance, tray, paths
 from lylaunch.icons import get_icon
 from lylaunch.ui.main_window import MainWindow
 
@@ -211,6 +211,20 @@ def main() -> int:
         return 1
     _dbg_print("[LyLaunch] MainWindow 构造完成。", flush=True)
     window.show_requested.connect(window.show_window)
+
+    # 外部工具（dsh）直连 127.0.0.1:18090，引擎不在就没人应答；
+    # 开了「保持本地引擎运行」就在启动后预热 Router（空壳，不加载模型）。
+    if config.load_keep_engine():
+        import threading
+
+        def _warm_engine() -> None:
+            try:
+                _engine_mgr.start()
+                _dbg_print("[LyLaunch] 常驻引擎已就绪。", flush=True)
+            except Exception as exc:      # 起不来不影响主程序，设置页会提示
+                _dbg_print(f"[LyLaunch] 常驻引擎启动失败：{exc}", flush=True)
+
+        threading.Thread(target=_warm_engine, name="engine-warm", daemon=True).start()
 
     # ② 系统托盘
     def show_cb():

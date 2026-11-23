@@ -286,3 +286,23 @@ def save_win_skin(value: str) -> None:
     data["WinSkin"] = v
     data.setdefault("Version", VERSION)
     _write_json(paths.CONFIG_FILE, data)
+
+
+# ---------- 常驻本地引擎（config.json） ----------
+# 开给「外部工具」（目前是 dsh）用：dsh 直接打 127.0.0.1:18090，
+# 引擎不在就没有服务。常驻的只是 Router 空壳（模型仍按需加载，平时不占显存）。
+DEFAULT_KEEP_ENGINE = False
+
+
+def load_keep_engine() -> bool:
+    data = _read_json(paths.CONFIG_FILE)
+    return bool((data or {}).get("KeepEngine", DEFAULT_KEEP_ENGINE))
+
+
+def save_keep_engine(value: bool) -> None:
+    data = _read_json(paths.CONFIG_FILE)
+    if not isinstance(data, dict):
+        data = {}
+    data["KeepEngine"] = bool(value)
+    data.setdefault("Version", VERSION)
+    _write_json(paths.CONFIG_FILE, data)

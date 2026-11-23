@@ -10,7 +10,7 @@ import os
 from ctypes.wintypes import MSG
 from PySide6.QtCore import (
     Qt, QAbstractNativeEventFilter, QCoreApplication, QRect, QSize, Signal,
-    QPropertyAnimation, QEasingCurve, QPointF, QRectF,
+    QPropertyAnimation, QEasingCurve, QPointF, QRectF, QThread,
 )
 from PySide6.QtGui import QKeyEvent, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from .. import autostart, build_info, config, hotkey, reset
 from ..config import MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN
 from ..hotkey import format_hotkey
+from ..integrations import dsh as _dsh
 from ..plugins import theme as _t
 from . import backdrop as _backdrop
 from .settings_common import RESET_BTN_TEXT, open_url
@@ -239,6 +240,34 @@ class _HintLabel(QLabel):
 
     def set_color(self, color: str | None = None) -> None:
         self.setStyleSheet(_hint(color))
+
+
+class _DshProbe(QThread):
+    """后台读一次 dsh 配置状态：设置页要建完就走，不能卡在磁盘 IO 上。"""
+
+    done = Signal(object)
+
+    def run(self) -> None:  # noqa: D401 - QThread 入口
+        try:
+            self.done.emit(_dsh.probe())
+        except Exception:  # 读不到就当没装，别让线程异常带崩界面
+            self.done.emit(None)
+
+
+class _EngineWarm(QThread):
+    """后台把本地 Router 拉起来（第一次启动约 1~2 秒，别卡住设置页）。"""
+
+    done = Signal(bool)
+
+    def run(self) -> None:  # noqa: D401 - QThread 入口
+        ok = False
+        try:
+            from ..engine.manager import EngineManager
+            EngineManager.instance().start()
+            ok = True
+        except Exception:      # 起不来不抛：状态由提示文案交代
+            ok = False
+        self.done.emit(ok)
 
 
 class _Segmented(QWidget):
@@ -566,6 +595,28 @@ class SettingsWindow(QDialog):
                             self.skin_seg, wide_hint=True)
             self.skin_hint = self._hint_label(col, wide=True)
             self._refresh_skin_hint()
+
+            # 外部集成：把本地模型写成 dsh 的自定义模型提供商（只动自己那一段）
+            cv4 = self._group(lay, "外部集成")
+            self.dsh_apply_btn = self._ghost_button("接入", self._on_dsh_apply)
+            self.dsh_revert_btn = self._ghost_button("撤销", self._on_dsh_revert)
+            col = self._row(cv4, "DeepSeek Harness",
+                            "把本地模型注册成 dsh 的自定义模型提供商",
+                            self._controls(self.dsh_apply_btn, self.dsh_revert_btn),
+                            wide_hint=True)
+            self.dsh_hint = self._hint_label(col, wide=True)
+            self._refresh_dsh_hint()
+
+            # dsh 直接打 127.0.0.1:18090：LyLaunch 没在跑引擎就必然 Connection error。
+            # 常驻的只是 Router 空壳，模型仍按需加载（不加载就不占显存）。
+            self.keep_engine = SwitchButton()
+            self.keep_engine.toggled.connect(self._on_keep_engine)
+            col = self._row(cv4, "保持本地引擎运行",
+                            "dsh 这类外部工具要连本机端口；开了之后引擎随程序启动，平时不加载模型",
+                            self.keep_engine, divider=True, wide_hint=True)
+            self.keep_engine_hint = self._hint_label(col, wide=True)
+            self._load_keep_engine()
+            self._start_dsh_probe()
 
         elif key == "hotkeys":
             self._page_title(lay, "快捷键", "全局唤起与截图组合键")
@@ -998,6 +1049,153 @@ class SettingsWindow(QDialog):
         if main is not None and hasattr(main, "apply_win_skin"):
             main.apply_win_skin(value)
         self._refresh_skin_hint()
+
+    # ---------- DeepSeek Harness ----------
+    def _start_dsh_probe(self) -> None:
+        probe = _DshProbe(self)
+        probe.done.connect(self._on_dsh_probed)
+        probe.finished.connect(probe.deleteLater)
+        self._dsh_probe = probe     # 保住引用：线程还没跑完就被回收会崩进程
+        probe.start()
+
+    def _on_dsh_probed(self, status) -> None:
+        self._dsh_status = status
+        self._refresh_dsh_hint()
+
+    def _refresh_dsh_hint(self) -> None:
+        st = getattr(self, "_dsh_status", None)
+        btn = getattr(self, "dsh_revert_btn", None)
+        if btn is not None:
+            btn.setEnabled(bool(st is not None and st.applied))
+        if st is None:
+            self.dsh_hint.setText("正在检查本机 dsh…")
+            self.dsh_hint.set_color(None)
+            return
+        if st.applied:
+            ids = "、".join(st.models[:3])
+            if len(st.models) > 3:
+                ids += f" 等 {len(st.models)} 个"
+            # dsh 的 agent 提示约 9.4k tokens：上下文不到 12K 的模型必然爆窗
+            tight = [m.id for m in _dsh.chat_models()
+                     if m.id in st.models and m.context < _dsh.MIN_USABLE_CONTEXT]
+            tail = ""
+            if tight:
+                tail = f"；{'、'.join(tight)} 的上下文太小，跑 dsh 会爆窗，换 16K 以上的模型"
+            if not st.engine_online:
+                tail += "；本地引擎现在没在跑，dsh 会报 Connection error，把下面那个开关打开"
+            self.dsh_hint.setText(
+                f"已接入：{ids}。到 dsh 的模型选择器里选「{_dsh.PROVIDER_NAME}」{tail}")
+            self.dsh_hint.set_color(_t.WARNING if (tight or not st.engine_online) else None)
+            return
+        if not st.installed:
+            self.dsh_hint.setText(f"没找到 dsh（{st.home}）。装好并跑过一次之后再来接入")
+            self.dsh_hint.set_color(_t.WARNING)
+            return
+        if not _dsh.chat_models():
+            self.dsh_hint.setText("未接入 · 本机还没有对话模型，先到「本地模型」页下载一个")
+            self.dsh_hint.set_color(_t.WARNING)
+            return
+        self.dsh_hint.setText(f"未接入 · 目标文件 {st.target}")
+        self.dsh_hint.set_color(None)
+
+    def _on_dsh_apply(self) -> None:
+        models = _dsh.chat_models()
+        if not models:
+            _t.show_warning(self, "没有可接入的模型",
+                            "本地还没有下载好的对话模型（Qwen3.5-9B、Qwen3-4B 这类）。\n\n"
+                            "先到「本地模型」页下载一个，再回来接入。")
+            return
+        st = _dsh.probe()
+        names = "、".join(m.id for m in models[:5])
+        if len(models) > 5:
+            names += f" 等 {len(models)} 个"
+        where = ("dsh 的 patch 层（桌面版实际读这一层）"
+                 if st.mode == "patch" else "dsh 的 settings.yaml")
+        text = (f"写入{where}：\n{st.target}\n\n"
+                f"注册模型：{names}\n\n"
+                "只改 llm-pi-ai.providers 下 LyLaunch 自己那一段，你的其它配置原样保留；"
+                f"首次改动前会把原文件备份成 {st.target.name}.lylaunch-bak。")
+        if not _t.ask_confirm(self, "接入 DeepSeek Harness", text, yes_text="接入"):
+            return
+        try:
+            self._dsh_status = _dsh.apply(models)
+        except _dsh.DshError as exc:
+            _t.show_warning(self, "接入失败", str(exc))
+            return
+        except OSError as exc:
+            _t.show_warning(self, "接入失败", f"写文件出错：{exc}")
+            return
+        self._refresh_dsh_hint()
+        # 接入完就该能用：顺手把常驻引擎打开，否则 dsh 那头必然 Connection error
+        if not config.load_keep_engine():
+            self.keep_engine.setChecked(True)     # 触发 _on_keep_engine：写配置 + 预热
+        elif not self._dsh_status.engine_online:
+            self._warm_engine()
+
+    def _on_dsh_revert(self) -> None:
+        st = _dsh.probe()
+        if not st.applied:
+            _t.show_warning(self, "没有可撤销的配置", "当前 dsh 配置里没有 LyLaunch 写入的内容。")
+            return
+        text = (f"从 {st.target} 里摘掉 LyLaunch 写的那一段，\n"
+                f"并删掉 .env 里的占位密钥 {_dsh.API_KEY_ENV}。\n\n"
+                "你自己的 provider 和其它设置不受影响。")
+        if not _t.ask_confirm(self, "撤销 dsh 接入", text, yes_text="撤销"):
+            return
+        try:
+            self._dsh_status = _dsh.revert()
+        except OSError as exc:
+            _t.show_warning(self, "撤销失败", f"写文件出错：{exc}")
+            return
+        self._refresh_dsh_hint()
+
+    # ---------- 常驻本地引擎 ----------
+    def _load_keep_engine(self) -> None:
+        """初始化开关显示：blockSignals 避免 setChecked 触发 toggled 重复写配置。"""
+        on = config.load_keep_engine()
+        self.keep_engine.blockSignals(True)
+        self.keep_engine.setChecked(on)
+        self.keep_engine.blockSignals(False)
+        self._refresh_keep_engine_hint()
+
+    def _refresh_keep_engine_hint(self) -> None:
+        if not config.load_keep_engine():
+            self.keep_engine_hint.setText(
+                "未开启 · dsh 要连 127.0.0.1:18090，LyLaunch 没在跑引擎时会连不上")
+            self.keep_engine_hint.set_color(None)
+            return
+        if _dsh.engine_online():
+            self.keep_engine_hint.setText(
+                "已开启 · Router 常驻，模型仍按需加载（不加载就不占显存）")
+            self.keep_engine_hint.set_color(_t.SUCCESS)
+            return
+        self.keep_engine_hint.setText("已开启 · Router 还没起来（首次启动需要一两秒）")
+        self.keep_engine_hint.set_color(_t.WARNING)
+
+    def _on_keep_engine(self, checked: bool) -> None:
+        config.save_keep_engine(checked)
+        self._refresh_keep_engine_hint()
+        # 关掉只是不再自动拉起；已在跑的 Router 留给本次运行用（不硬杀，免得打断 dsh）
+        if checked and not _dsh.engine_online():
+            self._warm_engine()
+
+    def _warm_engine(self) -> None:
+        self.keep_engine_hint.setText("正在启动本地引擎…")
+        self.keep_engine_hint.set_color(None)
+        warm = _EngineWarm(self)
+        warm.done.connect(self._on_engine_warm)
+        warm.finished.connect(warm.deleteLater)
+        self._engine_warm = warm      # 保住引用：线程跑完前被回收会崩进程
+        warm.start()
+
+    def _on_engine_warm(self, ok: bool) -> None:
+        self._refresh_keep_engine_hint()
+        if ok:
+            self._start_dsh_probe()    # 引擎起来了，dsh 提示里的"没在跑"该消掉
+        else:
+            self.keep_engine_hint.setText(
+                "引擎没起来（端口被占或运行库缺失），看「开发者」页的日志")
+            self.keep_engine_hint.set_color(_t.DANGER)
 
     # ---------- 搜索索引 ----------
     def _index_obj(self):
