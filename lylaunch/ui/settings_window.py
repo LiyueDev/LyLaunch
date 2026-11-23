@@ -1208,6 +1208,10 @@ class SettingsWindow(QDialog):
         elif value == _dsh.MIN_USABLE_CONTEXT:
             tail = "跑 dsh 够用（提示占 9.4K，剩下约 7K 给对话）"
             self.ctx_hint.set_color(None)
+        elif value >= config.ENGINE_CONTEXT_MAX:
+            # 顶档就是按这台机器的显存账单算出来的天花板，再高会直接 OOM
+            tail = "这台机器的实测上限（12GB 显存刚好装下，再高要 OOM）"
+            self.ctx_hint.set_color(_t.WARNING)
         else:
             tail = "更长对话也装得下；显存吃紧就往下调一档"
             self.ctx_hint.set_color(None)

@@ -218,8 +218,9 @@ def save_models_max(value: str) -> None:
 
 # 单个模型的上下文窗口（--ctx-size，也同步给 dsh 的 contextWindow）。
 # 8K 跑不动 dsh：它的系统提示 + 工具描述约 9.4K tokens，光提示就超了。
-# 档位偏保守：9B 模型 16K 约 7.5GB 显存，再往上 KV cache 是翻倍的。
-ENGINE_CONTEXT_STEPS = (8192, 12288, 16384, 24576, 32768, 49152, 65536)
+# 档位按 12GB 卡的实测账单排：9B（权重 4.8G）KV 约 35 KiB/token，
+# 112K 留出余量，122K 已经是这张卡的上限（再高就要挤占桌面显存）。
+ENGINE_CONTEXT_STEPS = (8192, 12288, 16384, 24576, 32768, 49152, 65536, 114688, 124928)
 DEFAULT_ENGINE_CONTEXT = 16384
 ENGINE_CONTEXT_MIN = ENGINE_CONTEXT_STEPS[0]
 ENGINE_CONTEXT_MAX = ENGINE_CONTEXT_STEPS[-1]
