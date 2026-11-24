@@ -71,9 +71,14 @@ class ExternalEngine(EngineManager):
         return {"changed": after != before, "restarted": restarted, "effective": after}
 
     # ---------------------------------------------------------------- 状态
-    def state(self) -> dict:
-        """设置页展示用：在线 / pid / 已加载模型的实际 n_ctx / 是否与设置一致。"""
-        running = self.running()
+    def state(self, probe: bool = True, timeout: float = 0.6) -> dict:
+        """设置页展示用：在线 / pid / 已加载模型的实际 n_ctx / 是否与设置一致。
+
+        ``probe=False`` 只读本地配置与 pid 文件，不碰网络 —— 设置窗构造期用它
+        抢回那一秒多（本机回环上探测未监听端口要耗满 timeout）；真正的在线状态
+        由后台线程拿 ``probe=True`` 补上，那时 ``running`` 为 None 表示"还没问到"。
+        """
+        running = self.running(timeout=timeout) if probe else None
         return {
             "running": running,
             "pid": self.pid(),

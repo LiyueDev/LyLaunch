@@ -306,9 +306,14 @@ class EngineManager:
                     except Exception:
                         pass
 
-    def running(self) -> bool:
-        """端口上有没有 Router 在应答（不管是不是本进程拉起的）。"""
-        return port_health(self.port, timeout=0.6)
+    def running(self, timeout: float = 0.6) -> bool:
+        """端口上有没有 Router 在应答（不管是不是本进程拉起的）。
+
+        ``timeout`` 是本次健康探测的上限：UI 里同步问一次要按毫秒级给
+        （本机回环上"端口没监听"不会立刻 RST，而是耗满超时，默认 0.6s
+        就足够让设置页卡半秒），后台线程可以放宽。
+        """
+        return port_health(self.port, timeout=timeout)
 
     def pid(self) -> int:
         """当前 Router 的 pid：优先自己持有的 Popen，其次 pid 文件；都没有返回 0。"""

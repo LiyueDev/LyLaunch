@@ -291,6 +291,37 @@ class _EngineWarm(QThread):
         self.done.emit(ok)
 
 
+class _StateProbe(QThread):
+    """后台问一次两套引擎在不在线（18090 / 18091）。
+
+    为什么必须后台：本机回环上连"没监听的端口"不会立刻 RST，而是耗满超时
+    （实测 127.0.0.1 任意空端口 connect 都要 1000 ms），`running()` 默认
+    0.6 s × 2 = 1.2 s。放在构造期就是打开设置先卡一秒多；丢到线程里，
+    首帧立刻出来，"检测中…" 随后被真实状态替换。
+    """
+
+    done = Signal(object)
+
+    def __init__(self, host, parent=None) -> None:
+        super().__init__(parent)
+        self._host = host
+
+    def run(self) -> None:  # noqa: D401 - QThread 入口
+        result: dict = {"ext": None, "keep": None}
+        try:
+            ext = self._host._ext()
+            if ext is not None:
+                result["ext"] = ext.state(probe=True, timeout=0.35)
+        except Exception:
+            pass
+        try:
+            from ..engine.manager import EngineManager
+            result["keep"] = EngineManager.instance().running(timeout=0.35)
+        except Exception:
+            pass
+        self.done.emit(result)
+
+
 class _Segmented(QWidget):
     """分段选择器：一排互斥小按钮，选中=蓝色实心，未选中=浅灰描边。
 
@@ -424,6 +455,18 @@ class SettingsWindow(QDialog):
         self._capturing_for = None
         self._resume_main_hotkeys()
         self._remove_native_filter()
+        # 引擎状态探测还在跑时关窗：断信号再等它退，避免回调打到已析构的控件上
+        probe = getattr(self, "_state_probe", None)
+        if probe is not None:
+            self._state_probe = None
+            try:
+                probe.done.disconnect()
+            except Exception:
+                pass
+            try:
+                probe.wait(800)
+            except Exception:
+                pass
         # 后台线程收尾：下载/卸载/目录统计还在跑时直接销毁窗口，信号会打到
         # 已经析构的控件上。下载会被取消（.part 保留，下次续传）。
         for attr in ("models_section", "data_section", "plugin_keys_section"):
@@ -1125,6 +1168,7 @@ class SettingsWindow(QDialog):
 
         self._load_ext_engine()
         self._start_dsh_probe()
+        self._start_state_probe()      # 两套引擎在不在线，后台问，首帧不等它
 
     def _load_engine_ctx(self) -> None:
         """滑块对齐到已保存的档位（不触发 valueChanged，避免误判成用户改动）。"""
@@ -1227,27 +1271,46 @@ class SettingsWindow(QDialog):
             return None
 
     def _load_ext_engine(self) -> None:
-        """开关对齐到已保存的状态，再刷一次状态文案。"""
+        """开关对齐到已保存的状态；在线状态留给后台探测，构造期不碰网络。"""
         on = config.load_ext_engine()
         self.ext_engine.blockSignals(True)
         self.ext_engine.setChecked(on)
         self.ext_engine.blockSignals(False)
-        self._refresh_ext_hint()
+        self._refresh_ext_hint(probe=False)
 
-    def _refresh_ext_hint(self) -> None:
-        """外部引擎现在到底跑没跑、pid 多少、已加载模型的实际 n_ctx。"""
+    def _refresh_ext_hint(self, probe: bool = True) -> None:
+        """外部引擎现在到底跑没跑、pid 多少、已加载模型的实际 n_ctx。
+
+        ``probe=False`` 只渲染「检测中…」（0 ms，构造期用）；``probe=True``
+        同步问一次端口，超时压到 0.35 s（本机回环空端口要耗满超时，
+        默认 0.6 s 会让按钮点完顿半秒）。
+        """
         from ..engine import EXTERNAL_PORT
-        want = config.load_engine_context()
+        if not probe:
+            self._render_ext_hint({
+                "running": None, "pid": 0, "port": EXTERNAL_PORT, "n_ctx": 0,
+                "enabled": config.load_ext_engine(),
+            })
+            return
         state = {"running": False, "pid": 0, "port": EXTERNAL_PORT,
                  "n_ctx": 0, "enabled": config.load_ext_engine()}
         ext = self._ext()
         if ext is not None:
             try:
-                state = ext.state()
+                state = ext.state(probe=True, timeout=0.35)
             except Exception:
                 pass
-        if state["running"]:
-            ctx = state["n_ctx"]
+        self._render_ext_hint(state)
+
+    def _render_ext_hint(self, state: dict) -> None:
+        """把上面那份状态渲染成提示文案（同步/异步两条路径共用）。"""
+        want = config.load_engine_context()
+        running = state.get("running")
+        if running is None:
+            self.ext_hint.setText("正在检测外部引擎状态…")
+            self.ext_hint.set_color(None)
+        elif running:
+            ctx = state.get("n_ctx") or 0
             if ctx and ctx != want:
                 self.ext_hint.setText(
                     f"运行中 · pid {state['pid']} · 已加载 {_ctx_text(ctx)}"
@@ -1258,7 +1321,7 @@ class SettingsWindow(QDialog):
                 self.ext_hint.setText(
                     f"运行中 · pid {state['pid']} · 端口 {state['port']}{tail} · 插件暂停使用本地模型")
                 self.ext_hint.set_color(_t.SUCCESS)
-        elif state["enabled"]:
+        elif state.get("enabled"):
             self.ext_hint.setText(
                 "已开启，但 18091 还没应答（首次启动要一两秒；一直不行就点「重启」）")
             self.ext_hint.set_color(_t.WARNING)
@@ -1277,6 +1340,7 @@ class SettingsWindow(QDialog):
                     pass
             self._load_ext_engine()
             self._start_dsh_probe()
+            self._start_state_probe()
             return
         if not _t.ask_confirm(
             self, "启用外部引擎",
@@ -1311,6 +1375,8 @@ class SettingsWindow(QDialog):
             self.ext_hint.setText(
                 "外部引擎没起来（端口被占或运行库缺失），看「开发者」页的 engine-ext.log")
             self.ext_hint.set_color(_t.DANGER)
+        else:
+            self._start_state_probe()    # 起来了：后台补一次 pid / n_ctx 的真实状态
         self._start_dsh_probe()          # 引擎状态变了，接入提示里"没在跑"该消掉
 
     def _on_ext_restart(self) -> None:
@@ -1348,8 +1414,38 @@ class SettingsWindow(QDialog):
             _t.show_warning(self, "结束失败", str(e))
         self._load_ext_engine()
         self._start_dsh_probe()
+        self._start_state_probe()
 
     # ---------- DeepSeek Harness ----------
+    def _start_state_probe(self) -> None:
+        """后台问一次两套引擎在不在线；回来再替换「检测中…」文案。
+
+        幂等：上一个还没跑完就不重复起（连点开关时会连调这里的）。
+        """
+        prev = getattr(self, "_state_probe", None)
+        if prev is not None and prev.isRunning():
+            return
+        probe = _StateProbe(self, self)
+        probe.done.connect(self._on_state_probed)
+        probe.finished.connect(probe.deleteLater)
+        self._state_probe = probe        # 保住引用：线程还没跑完就被回收会崩进程
+        probe.start()
+
+    def _on_state_probed(self, result) -> None:
+        if not isinstance(result, dict):
+            return
+        if result.get("ext") is not None:
+            try:
+                self._render_ext_hint(result["ext"])
+            except Exception:
+                pass
+        keep = result.get("keep")
+        if keep is not None:
+            try:
+                self._render_keep_engine_hint(bool(keep))
+            except Exception:
+                pass
+
     def _start_dsh_probe(self) -> None:
         probe = _DshProbe(self)
         probe.done.connect(self._on_dsh_probed)
@@ -1460,27 +1556,45 @@ class SettingsWindow(QDialog):
 
     # ---------- 插件引擎常驻 ----------
     def _load_keep_engine(self) -> None:
-        """初始化开关显示：blockSignals 避免 setChecked 触发 toggled 重复写配置。"""
+        """初始化开关显示：blockSignals 避免 setChecked 触发 toggled 重复写配置。
+
+        在线状态同样留给后台探测（构造期只读配置，不探端口）。
+        """
         on = config.load_keep_engine()
         self.keep_engine.blockSignals(True)
         self.keep_engine.setChecked(on)
         self.keep_engine.blockSignals(False)
-        self._refresh_keep_engine_hint()
+        self._refresh_keep_engine_hint(probe=False)
 
-    def _refresh_keep_engine_hint(self) -> None:
+    def _refresh_keep_engine_hint(self, probe: bool = True) -> None:
         if config.load_ext_engine():
             self.keep_engine_hint.setText(
                 "外部引擎开着时不预热这一套（显存要留给 dsh）；关掉外部引擎后按需启动")
             self.keep_engine_hint.set_color(_t.WARNING)
             return
-        try:
-            from ..engine.manager import EngineManager
-            online = EngineManager.instance().running()
-        except Exception:
-            online = False
+        online = None
+        if probe:
+            try:
+                from ..engine.manager import EngineManager
+                online = EngineManager.instance().running(timeout=0.35)
+            except Exception:
+                online = False
+        self._render_keep_engine_hint(online)
+
+    def _render_keep_engine_hint(self, online: bool | None) -> None:
+        """``online=None`` 表示后台还没问回来，先显示「检测中」。"""
+        if config.load_ext_engine():
+            self.keep_engine_hint.setText(
+                "外部引擎开着时不预热这一套（显存要留给 dsh）；关掉外部引擎后按需启动")
+            self.keep_engine_hint.set_color(_t.WARNING)
+            return
         if not config.load_keep_engine():
             self.keep_engine_hint.setText(
                 "未开启 · 插件用到模型时临时启动（每次多等一两秒）")
+            self.keep_engine_hint.set_color(None)
+            return
+        if online is None:
+            self.keep_engine_hint.setText("正在检测插件引擎状态…")
             self.keep_engine_hint.set_color(None)
             return
         if online:
@@ -1493,7 +1607,9 @@ class SettingsWindow(QDialog):
 
     def _on_keep_engine(self, checked: bool) -> None:
         config.save_keep_engine(checked)
-        self._refresh_keep_engine_hint()
+        # 不在这里同步探端口（本机空端口要耗满 0.35s）：先显示「检测中」，后台补真实状态
+        self._refresh_keep_engine_hint(probe=False)
+        self._start_state_probe()
         # 关掉只是不再自动拉起；已在跑的 Router 留给本次运行用（不硬杀，免得打断插件）
         if checked and not config.load_ext_engine():
             self._warm_engine()
@@ -1509,8 +1625,10 @@ class SettingsWindow(QDialog):
         warm.start()
 
     def _on_engine_warm(self, ok: bool) -> None:
-        self._refresh_keep_engine_hint()
-        if not ok:
+        if ok:
+            self._render_keep_engine_hint(True)   # 刚起成功了，不用再问一次端口
+        else:
+            self._refresh_keep_engine_hint(probe=False)
             self.keep_engine_hint.setText(
                 "引擎没起来（端口被占或运行库缺失），看「开发者」页的日志")
             self.keep_engine_hint.set_color(_t.DANGER)
@@ -1611,7 +1729,12 @@ class SettingsWindow(QDialog):
     # ---------- 插件管理（列表本体在 settings_plugins.py）
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        # 每次打开都重读一次插件状态：插件可能在别处被启停 / 装掉过
+        # 每次打开都重读一次插件状态：插件可能在别处被启停 / 装掉过。
+        # 排到首帧之后：插件列表要扫目录 + 读图标（实测 26 ms），
+        # 先让窗口画出来再做刷新，打开的那一下才不顿。
+        QTimer.singleShot(0, self._refresh_sections)
+
+    def _refresh_sections(self) -> None:
         for attr in ("plugins_section", "plugin_keys_section"):
             sec = getattr(self, attr, None)
             if sec is not None:
