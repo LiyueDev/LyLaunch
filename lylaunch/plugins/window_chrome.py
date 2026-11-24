@@ -274,11 +274,14 @@ class ChromeTitleBar(QWidget):
 def install_chrome(window: QDialog, title: str, icon_name: str = "",
                    show_minmax: bool = False, resizable: bool = False,
                    solid: bool = False, side_margin: int = 14,
-                   bg_alpha: float = 1.0, frosted: bool = False):
+                   bg_alpha: float = 1.0, frosted: bool = False,
+                   title_bar: bool = True):
     """给插件窗口装上统一外壳。须在构造期、show() 之前调用。
 
     ``resizable=True`` 用 QDialog.setSizeGripEnabled() 补回右下角缩放把手
     （无边框窗口没有系统缩放边框；本地 AI 依赖它拖窗口大小）。
+    ``title_bar=False`` 只设无边框 / 透明 / 圆角，不插标题栏 —— 给「纯玻璃块」
+    式面板用（拖动/关闭由调用方自己接管）。默认 True，不影响其他插件。
     """
     root = window.layout()
     if not isinstance(root, QVBoxLayout):
@@ -293,10 +296,15 @@ def install_chrome(window: QDialog, title: str, icon_name: str = "",
     window.setObjectName("lylaunchPluginWindow")
     # QSS 只负责清掉各插件的方角背景 + 导航栏按钮样式；圆角底由 _ChromePainter 画
     window.setStyleSheet((window.styleSheet() or "") + _CHROME_QSS)
-    window.installEventFilter(_ChromePainter(window, solid, bg_alpha, frosted))
+    # painter=False：插件自己画圆角/描边（如纯玻璃块），不要再叠一层 chrome 圆角，
+    # 否则出现内外两圈同心边框。无边框/透明等属性仍照常设置。
+    if title_bar or bg_alpha > 0.0:
+        window.installEventFilter(_ChromePainter(window, solid, bg_alpha, frosted))
 
-    bar = ChromeTitleBar(window, title, icon_name, show_minmax)
-    root.insertWidget(0, bar)
+    bar = None
+    if title_bar:
+        bar = ChromeTitleBar(window, title, icon_name, show_minmax)
+        root.insertWidget(0, bar)
     # 导航栏左右各留一点，避免内容贴到圆角上
     cm = root.contentsMargins()
     # 左右留边要够圆角（16px），否则方角子控件会把圆角盖掉；但本地 AI 侧栏

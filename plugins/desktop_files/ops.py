@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 
@@ -155,6 +156,64 @@ def collected_count(root: str) -> int:
     if not mark.get("hidden_by_us"):
         return 0
     return len(mark.get("moved") or [])
+
+
+# ---------------------------------------------------------------- 桌面图标隐藏 / 显示
+# 和收纳标记（desktop_files_state.json）**分开存**：
+# 收纳标记里的 moved 是「文件搬哪去了」的账本，藏图标时绝不能覆盖它，
+# 否则「恢复原状」会失去记录。这里只记一个布尔：桌面图标是不是我们藏的。
+ICONS_FLAG_NAME = "desktop_files_icons.json"
+
+
+def icons_flag_path() -> str:
+    return os.path.join(os.path.dirname(di.state_path()), ICONS_FLAG_NAME)
+
+
+def read_icons_flag() -> bool:
+    try:
+        with open(icons_flag_path(), "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return bool(data.get("hidden")) if isinstance(data, dict) else False
+    except Exception:
+        return False
+
+
+def write_icons_flag(hidden: bool) -> None:
+    """原子写标记（先写临时文件再 replace，断电不会留下半个文件）。"""
+    try:
+        path = icons_flag_path()
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"hidden": bool(hidden)}, handle)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def set_desktop_icons_hidden(desired: bool, allow_fallback: bool = False) -> tuple[bool, str]:
+    """系统级隐藏 / 显示全部桌面图标（右键菜单那两项）。
+
+    返回 ``(ok, message)``。藏图标只改注册表 / 发翻转命令，不动任何文件，
+    也**不写**收纳标记 —— 两套状态互不干扰。
+    """
+    ok, immediate, message = di.set_hidden(
+        bool(desired), allow_showwindow_fallback=bool(allow_fallback))
+    if not ok:
+        return False, message or "切换失败：请右键桌面 → 查看 → 显示桌面图标"
+    write_icons_flag(bool(desired))
+    if not immediate:
+        return True, message or "已记录，桌面未即时刷新（按 F5 试试）"
+    if desired:
+        return True, "全部桌面图标已隐藏（退出程序会自动恢复）"
+    return True, "桌面图标已恢复显示"
+
+
+def restore_icons_on_exit() -> bool:
+    """退出兜底：上次是我们藏的才放回来；返回是否真的做了恢复。"""
+    if not read_icons_flag():
+        return False
+    ok, _message = set_desktop_icons_hidden(False)
+    return ok
 
 
 # ---------------------------------------------------------------- 插件数据 / 白名单

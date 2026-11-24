@@ -1,9 +1,9 @@
 {
   "Id": "desktop_files",
   "Name": "桌面净化",
-  "Version": "0.1.2",
+  "Version": "0.2.14",
   "Author": "LiyueDev",
-  "Description": "一键隐藏/显示桌面图标，让桌面保持干净；同时把桌面上的所有文件和文件夹变成可搜索列表：双击或回车直接打开，右键可在资源管理器中定位。退出程序会自动恢复图标。",
+  "Description": "把桌面上的文件和文件夹按类型一键收纳进「桌面净化」分类，随时整体移回；分区视图里可搜索、拖动归类、打开任意桌面文件。面板支持两套皮肤（经典 / 浅色毛玻璃：DWM 实时背景模糊 + 奶白雾 + 柔和投影 + 大圆角，背后画面一动就跟着变，字色随壁纸明暗自动切换深/白），图标带磁盘缓存（开面板就是现成图标，不再逐张回填），收纳、恢复、桌面图标、快捷键等全部集中在插件内设置页里随时切换。",
   "Icon": "",
   "Main": "main.py",
   "EntryClass": "Plugin",
@@ -27,14 +27,7 @@
   "Hotkey": "Alt+D",
   "Config": {
     "auto_restore_on_exit": true,
-    "restore_on_window_close": false,
-    "hide_mode": "fences",
-    "include_public_desktop": true,
-    "show_hidden_files": false,
-    "exclude_shortcuts": true,
-    "max_items": 500,
-    "allow_showwindow_fallback": false,
-    "pinyin_search": false,
-    "sort_by": "type"
+    "allow_showwindow_fallback": false
   }
 }
+
