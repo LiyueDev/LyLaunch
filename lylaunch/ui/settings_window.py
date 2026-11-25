@@ -732,7 +732,7 @@ class SettingsWindow(QDialog):
                 config.load_models_max())
             self.models_max_seg.changed.connect(self._on_models_max)
             col = self._row(cv, "同时运行模型数",
-                            "翻译、文档识别、本地 AI 共用一套引擎，这里选同时开几个",
+                            "文本识别、多语言翻译、本地多模态共用一套引擎，这里选同时开几个",
                             self.models_max_seg, wide_hint=True)
             self.models_max_hint = self._hint_label(col, wide=True)
             # 模型文件管理（汇总 / 已装 / 可下载）由独立模块装配，见 settings_models.py

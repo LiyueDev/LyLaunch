@@ -37,7 +37,8 @@ _CAP_TEXT = {
     "translate": "翻译", "chat": "对话", "thinking": "思考",
 }
 # 分页里的能力分组：顺序 = 界面上从上到下
-_GROUPS = (("doc", "文档识别"), ("mt", "翻译"), ("llm", "本地 AI"))
+_GROUPS = (("doc", "文本识别专精模型"), ("mt", "多语言翻译专精模型"),
+           ("llm", "本地多模态模型"))
 
 
 def _cap_text(spec) -> str:
@@ -158,7 +159,7 @@ class _ModelsSection:
         cv = self.host._group(lay, "模型文件")
         col = self.host._row(
             cv, "本地模型",
-            "翻译、文档识别、本地 AI 共用一套引擎；装好的模型直接可用",
+            "文本识别、多语言翻译、本地多模态共用一套引擎；装好的模型直接可用",
             self.host._link_button("打开模型目录", self._open_models_dir),
             wide_hint=True)
         self.summary_hint = self.host._hint_label(col, wide=True)
