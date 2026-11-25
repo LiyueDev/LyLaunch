@@ -8,7 +8,7 @@
 
 | 文件 | 大小 | SHA256 |
 |---|---|---|
-| `LyLaunch-1.2.3-setup.exe` | 出包后补 | 出包后补 |
+| `LyLaunch-1.2.3-setup.exe` | 158.4 MB | `7C1C23217E06CEDFCBC3639BB9EE6D3D8DA3B0BF0EF25A123329F1E64A417B7B` |
 
 - 系统要求：Windows 10 / 11，64 位
 - 安装包**不含模型权重**，插件与外部集成的模型在首次使用时按需下载

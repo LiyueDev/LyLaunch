@@ -33,7 +33,10 @@
 
 ## 1.2.3 — 2026-11-25
 
-**安装包**：`LyLaunch-1.2.3-setup.exe`（本次以**源码推送**为主，出包后补大小与 SHA256）
+**安装包**：`LyLaunch-1.2.3-setup.exe`（158.4 MB / 166,107,999 B，2026-11-25 10:55 出包）
+
+- SHA256：`7C1C23217E06CEDFCBC3639BB9EE6D3D8DA3B0BF0EF25A123329F1E64A417B7B`
+- 构建：PyInstaller 6.22.3（109 s）+ Inno Setup 6.7.3（107 s）；出包前先 `taskkill /F /IM LyLaunch.exe`，否则 `ctranslate2.dll` 被占用会 `WinError 5`
 
 ### 新增
 
