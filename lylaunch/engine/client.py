@@ -154,6 +154,19 @@ class RouterClient:
             pass
 
     # ---------------------------------------------------------------- 推理（非流式）
+    def _trace(self, model: str, prompt_tok: int, out_tok: int, dur_ms: float,
+               ttft_ms: float | None = None, ok: bool = True) -> None:
+        """把一次推理记进本地监控库（设置 → 外部集成 → 运行监控）。
+
+        埋点绝不能影响真实请求：monitor 或 sqlite 出任何问题都静默吞掉。
+        """
+        try:
+            from . import monitor
+            monitor.instance(self.port).record_request(
+                model, prompt_tok, out_tok, dur_ms, ttft_ms, ok)
+        except Exception:
+            pass
+
     def chat(self, model_id: str, messages: list, timeout: int | None = None,
              retries: int = 4, on_wait=None, **params) -> dict:
         """POST /v1/chat/completions（非流式）。503/连接失败时退避重试。
@@ -170,11 +183,18 @@ class RouterClient:
 
         delays = [0.5, 1.0, 2.0, 4.0]
         last_err: Exception | None = None
+        t0 = time.perf_counter()
         for attempt in range(retries + 1):
             try:
                 raw = self._request("/v1/chat/completions", payload, "POST",
                                     timeout or self.default_timeout)
-                return json.loads(raw.decode("utf-8"))
+                obj = json.loads(raw.decode("utf-8"))
+                usage = obj.get("usage") or {}
+                self._trace(model_id,
+                            int(usage.get("prompt_tokens") or 0),
+                            int(usage.get("completion_tokens") or 0),
+                            (time.perf_counter() - t0) * 1000.0)
+                return obj
             except urllib.error.HTTPError as e:
                 body = e.read()[:400].decode("utf-8", "replace")
                 # 503 = 模型正在加载；429 = 并发受限；都值得等
@@ -215,28 +235,61 @@ class RouterClient:
             self._base() + "/v1/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
             headers=self._headers(True), method="POST")
-        with local_open(req, timeout=timeout or 600) as resp:
-            for raw in resp:
-                line = raw.decode("utf-8", "replace").strip()
-                if not line or not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
+        # 埋点：流结束后凭 usage 落一条记录（首字时间、耗时、t/s）。
+        # 调用方可能中途 break，所以放在 finally 里，且只在真拿到 token 数时记。
+        t0 = time.perf_counter()
+        ttft = 0.0
+        out_chars = 0
+        usage: dict = {}
+        ok = True
+        try:
+            with local_open(req, timeout=timeout or 600) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                    except Exception:
+                        continue
+                    if obj.get("usage"):
+                        usage = obj["usage"]
+                        yield ("usage", usage)
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    think = delta.get("reasoning_content") or delta.get("reasoning")
+                    if think:
+                        if not ttft:
+                            ttft = (time.perf_counter() - t0) * 1000.0
+                        out_chars += len(think)
+                        yield ("think", think)
+                    text = delta.get("content")
+                    if text:
+                        if not ttft:
+                            ttft = (time.perf_counter() - t0) * 1000.0
+                        out_chars += len(text)
+                        yield ("text", text)
+        except GeneratorExit:
+            # 调用方主动提前结束：不算失败，但记录会标记为未完成
+            ok = False
+            raise
+        finally:
+            out_tok = int(usage.get("completion_tokens") or 0)
+            prompt_tok = int(usage.get("prompt_tokens") or 0)
+            if not out_tok and out_chars:
+                # 没有 usage（老版本 router / 被中途打断）就按约 3 字符≈1 token 估
+                out_tok = max(1, out_chars // 3)
+            if not prompt_tok:
                 try:
-                    obj = json.loads(data)
+                    prompt_tok = max(0, sum(len(str(m.get("content") or ""))
+                                            for m in messages) // 3)
                 except Exception:
-                    continue
-                usage = obj.get("usage")
-                if usage:
-                    yield ("usage", usage)
-                choices = obj.get("choices") or []
-                if not choices:
-                    continue
-                delta = choices[0].get("delta") or {}
-                think = delta.get("reasoning_content") or delta.get("reasoning")
-                if think:
-                    yield ("think", think)
-                text = delta.get("content")
-                if text:
-                    yield ("text", text)
+                    prompt_tok = 0
+            if prompt_tok or out_tok:
+                self._trace(model_id, prompt_tok, out_tok,
+                            (time.perf_counter() - t0) * 1000.0, ttft, ok)

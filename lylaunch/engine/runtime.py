@@ -205,6 +205,33 @@ def process_image_name(pid: int) -> str:
 
 # ---------------------------------------------------------------- 显存
 _VRAM_CACHE: int | None = None
+_UNSET = object()
+_SMI_CACHE: object = _UNSET      # 未探测：None = 找不到，str = 绝对路径
+
+
+def nvidia_smi() -> str | None:
+    """nvidia-smi 的绝对路径；找不到返回 None。
+
+    别直接写 `"nvidia-smi"`：它装在 `C:\\Windows\\System32\\` 下却**不在 PATH 里**，
+    用裸命令只会 FileNotFoundError —— `vram_total_mb()` 之前因此长期返回 0，
+    `resolve_models_max()` 的 auto 档也就一直保守取 1。
+    """
+    global _SMI_CACHE
+    if _SMI_CACHE is not _UNSET:
+        return _SMI_CACHE                      # type: ignore[return-value]
+    import os as _os
+    from pathlib import Path as _Path
+    win = _os.environ.get("SystemRoot") or r"C:\Windows"
+    for p in (_Path(win) / "System32" / "nvidia-smi.exe",
+              _Path(r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe")):
+        try:
+            if p.is_file():
+                _SMI_CACHE = str(p)
+                return str(p)
+        except Exception:
+            continue
+    _SMI_CACHE = None
+    return None
 
 
 def vram_total_mb() -> int:
@@ -218,10 +245,16 @@ def vram_total_mb() -> int:
     if _VRAM_CACHE is not None:
         return _VRAM_CACHE
     mb = 0
+    exe = nvidia_smi()
     try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, timeout=6, creationflags=0x08000000)
+        if exe:
+            out = subprocess.run(
+                [exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True, timeout=6, creationflags=0x08000000)
+        else:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True, timeout=6, creationflags=0x08000000)
         if out.returncode == 0:
             toks = out.stdout.decode("utf-8", "ignore").replace(",", " ").split()
             vals = [int(t) for t in toks if t.isdigit() and int(t) > 0]

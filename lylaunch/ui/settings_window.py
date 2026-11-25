@@ -446,36 +446,54 @@ class SettingsWindow(QDialog):
         self._load_autostart()
         self._refresh_models_max_hint()
         self._refresh_about()
+        self._closed = False
         self._center_on_screen()
 
     def done(self, result: int) -> None:  # noqa: N802
         """窗口关闭时摘掉原生过滤器，避免它常驻在 QApplication 上（会一直持有本对象）。"""
+        # 置位给后台回调看：窗口已关，结果回来只丢不渲染（控件随时会被析构）
+        self._closed = True
         # 关闭时若还停在捕获状态，必须先恢复热键注册：否则用户关掉设置页之后，
         # 全局热键会一直是"已注销"，整个程序看起来彻底失灵。
         self._capturing_for = None
         self._resume_main_hotkeys()
         self._remove_native_filter()
-        # 引擎状态探测还在跑时关窗：断信号再等它退，避免回调打到已析构的控件上
-        probe = getattr(self, "_state_probe", None)
-        if probe is not None:
-            self._state_probe = None
+        # 后台线程收尾：还在跑就断信号再等它退，避免回调打到已析构的控件上。
+        # _state_probe / _dsh_probe / _ext_warm 都可能挂在端口探测或引擎启动上。
+        for attr in ("_state_probe", "_dsh_probe", "_ext_warm"):
+            th = getattr(self, attr, None)
+            if th is None:
+                continue
+            setattr(self, attr, None)
             try:
-                probe.done.disconnect()
+                th.done.disconnect()
             except Exception:
                 pass
             try:
-                probe.wait(800)
+                th.wait(900)
             except Exception:
                 pass
-        # 后台线程收尾：下载/卸载/目录统计还在跑时直接销毁窗口，信号会打到
-        # 已经析构的控件上。下载会被取消（.part 保留，下次续传）。
-        for attr in ("models_section", "data_section", "plugin_keys_section"):
+        # 下载/卸载/目录统计还在跑时直接销毁窗口，信号会打到已经析构的控件上。
+        # 下载会被取消（.part 保留，下次续传）。
+        for attr in ("models_section", "data_section", "plugin_keys_section", "monitor_section"):
             sec = getattr(self, attr, None)
             if sec is not None:
                 try:
                     sec.stop()
                 except Exception:
                     pass
+        # 监控采样线程可能正在 HTTP 请求里（1 s 超时），断信号别让回调打到已销毁控件
+        ms = getattr(self, "monitor_section", None)
+        w = getattr(ms, "_worker", None) if ms is not None else None
+        if w is not None:
+            try:
+                w.done.disconnect()
+            except Exception:
+                pass
+            try:
+                w.wait(1200)
+            except Exception:
+                pass
         super().done(result)
 
     def _remove_native_filter(self) -> None:
@@ -665,7 +683,7 @@ class SettingsWindow(QDialog):
 
         elif key == "integrations":
             self._page_title(lay, "外部集成",
-                             "把本地模型开放给本机的其他工具（目前支持 DeepSeek Harness）")
+                             "接入 dsh、独立引擎，以及两套引擎的运行监控")
             self._build_integrations_page(lay)
 
         elif key == "hotkeys":
@@ -1102,13 +1120,40 @@ class SettingsWindow(QDialog):
 
     # ---------- 外部集成（独立页） ----------
     def _build_integrations_page(self, lay: QVBoxLayout) -> None:
-        """DeepSeek Harness 接入 + 独立的外部引擎。
+        """DeepSeek Harness 接入 + 独立的外部引擎 + 运行监控。
 
         外部集成跑在自己的一套 Router（18091）上：preset 是 Router 启动时读进内存的，
         和插件共用一套就意味着「改外部集成的上下文要打断插件正在用的模型」，
         所以拆两套、各用各的 preset 与端口。开关默认关闭，打开时插件那套的模型被卸载。
+
+        「运行监控」是页内第二段（不新开导航项）：配置改完能立刻看到模型/显存的变化，
+        监控页懒加载——不进这一页就不启动采样线程，也不碰端口。
         """
-        cv = self._group(lay, "DeepSeek Harness")
+        head = QWidget()
+        hl = QHBoxLayout(head)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(0)
+        self.ext_seg = _Segmented([("config", "配置"), ("monitor", "运行监控")], "config")
+        self.ext_seg.changed.connect(self._on_ext_section)
+        hl.addWidget(self.ext_seg, 0, Qt.AlignmentFlag.AlignLeft)
+        hl.addStretch(1)
+        lay.addWidget(head)
+
+        self._ext_cfg = QWidget()
+        cfg_lay = QVBoxLayout(self._ext_cfg)
+        cfg_lay.setContentsMargins(0, 8, 0, 0)
+        cfg_lay.setSpacing(14)
+        lay.addWidget(self._ext_cfg)
+
+        self._ext_mon = QWidget()
+        self._monitor_layout = QVBoxLayout(self._ext_mon)
+        self._monitor_layout.setContentsMargins(0, 8, 0, 0)
+        self._monitor_layout.setSpacing(14)
+        self._ext_mon.hide()
+        lay.addWidget(self._ext_mon)
+        self.monitor_section = None
+
+        cv = self._group(cfg_lay, "DeepSeek Harness")
         self.dsh_apply_btn = self._ghost_button("接入", self._on_dsh_apply)
         self.dsh_revert_btn = self._ghost_button("撤销", self._on_dsh_revert)
         col = self._row(cv, "接入到 dsh",
@@ -1118,7 +1163,7 @@ class SettingsWindow(QDialog):
         self.dsh_hint = self._hint_label(col, wide=True)
         self._refresh_dsh_hint()
 
-        cv2 = self._group(lay, "外部引擎")
+        cv2 = self._group(cfg_lay, "外部引擎")
         self.ext_engine = SwitchButton()
         self.ext_engine.toggled.connect(self._on_ext_engine)
         col = self._row(cv2, "启用外部引擎",
@@ -1169,6 +1214,22 @@ class SettingsWindow(QDialog):
         self._load_ext_engine()
         self._start_dsh_probe()
         self._start_state_probe()      # 两套引擎在不在线，后台问，首帧不等它
+
+    def _on_ext_section(self, value: str) -> None:
+        """页内切换「配置 / 运行监控」：监控页懒建，离开就停采样（不占端口不打日志）。"""
+        if value == "monitor":
+            self._ext_cfg.hide()
+            self._ext_mon.show()
+            if self.monitor_section is None:
+                from .settings_monitor import build_monitor_block
+                build_monitor_block(self, self._monitor_layout)
+            else:
+                self.monitor_section.start()
+        else:
+            if self.monitor_section is not None:
+                self.monitor_section.stop()
+            self._ext_mon.hide()
+            self._ext_cfg.show()
 
     def _load_engine_ctx(self) -> None:
         """滑块对齐到已保存的档位（不触发 valueChanged，避免误判成用户改动）。"""
@@ -1370,6 +1431,8 @@ class SettingsWindow(QDialog):
         warm.start()
 
     def _on_ext_warm(self, ok: bool) -> None:
+        if getattr(self, "_closed", False):
+            return          # 关窗后才回来的启动结果：控件已销毁，只丢不渲染
         self._load_ext_engine()
         if not ok:
             self.ext_hint.setText(
@@ -1423,16 +1486,26 @@ class SettingsWindow(QDialog):
         幂等：上一个还没跑完就不重复起（连点开关时会连调这里的）。
         """
         prev = getattr(self, "_state_probe", None)
-        if prev is not None and prev.isRunning():
-            return
+        if prev is not None:
+            try:
+                if prev.isRunning():
+                    return
+            except RuntimeError:
+                # 上一轮的 QThread 已经 deleteLater 了，这张引用不能再碰
+                self._state_probe = None
         probe = _StateProbe(self, self)
         probe.done.connect(self._on_state_probed)
+        probe.finished.connect(self._clear_state_probe)
         probe.finished.connect(probe.deleteLater)
         self._state_probe = probe        # 保住引用：线程还没跑完就被回收会崩进程
         probe.start()
 
+    def _clear_state_probe(self) -> None:
+        """线程结束时把引用清掉，否则下次 `isRunning()` 会打到已销毁的 C++ 对象。"""
+        self._state_probe = None
+
     def _on_state_probed(self, result) -> None:
-        if not isinstance(result, dict):
+        if getattr(self, "_closed", False) or not isinstance(result, dict):
             return
         if result.get("ext") is not None:
             try:
@@ -1454,6 +1527,8 @@ class SettingsWindow(QDialog):
         probe.start()
 
     def _on_dsh_probed(self, status) -> None:
+        if getattr(self, "_closed", False):
+            return
         self._dsh_status = status
         self._refresh_dsh_hint()
 
