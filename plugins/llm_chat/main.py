@@ -2802,6 +2802,7 @@ class ModelDownloadDialog(QDialog):
         self.spec = eng.MODEL_BY_ID.get(mid)
         self._worker: SwitchWorker | None = None
         self._state = "download" if need_download else "load"
+        self._need_download = bool(need_download)   # 取消时只有下载路径才清文件
         self._paused = False
         self._speed = 0.0
         self._t_last = 0.0
@@ -3157,6 +3158,14 @@ QPushButton#dlClose:hover { background: #F0F3F8; color: #161C28; }
 
     def _on_cancelled(self) -> None:
         if self._state == "canceling":
+            # 取消 = 放弃这次下载：.part 和已下好的文件都删掉，别在磁盘上留半截。
+            # 「加载中」取消只是停止加载，绝不能碰已经装好的模型文件。
+            if self._need_download and self.spec is not None:
+                try:
+                    from lylaunch.engine import downloads as _dl
+                    _dl.cleanup_model_dir(self.spec)
+                except Exception:
+                    pass
             self.close()
 
     # ---------------------------------------------------------------- 窗口

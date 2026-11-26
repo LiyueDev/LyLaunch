@@ -7,6 +7,10 @@
 暂停不是「卡住不读」（那样服务端会把空闲连接掐掉、恢复时进度全丢），
 而是主动断开连接、把已下载字节留在 ``.part`` 里，恢复时用 HTTP Range
 从断点续传。ModelScope 的 CDN 实测支持 Range（206 Partial Content）。
+
+取消和暂停是两件事：**暂停**保留 ``.part`` 等续传；**取消**表示这次不下了，
+``_download`` 删掉当前 ``.part``，调用方再 ``cleanup_model_dir()`` 清掉该模型
+目录里已下好的文件与空目录（设置页和本地 AI 下载弹窗都这么做）。
 """
 from __future__ import annotations
 
@@ -67,46 +71,56 @@ def _download(url: str, dst: Path, progress=None, cancelled=None,
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(dst.name + ".part")
     total = 0
-    while True:
-        _hold_while_paused(paused, cancelled)
-        offset = tmp.stat().st_size if tmp.is_file() else 0
-        req = urllib.request.Request(url)
-        if offset:
-            req.add_header("Range", f"bytes={offset}-")   # 续传：只要剩下的
-        with urllib.request.urlopen(req, timeout=60) as r:
-            code = 200
-            try:
-                code = int(r.getcode() or 200)
-            except Exception:
-                pass
-            resumed = offset > 0 and code == 206
-            if offset and not resumed:
-                # 服务器不认 Range（返回 200 全量）：只能从头写，先清掉残片
-                offset = 0
-            clen = int(r.headers.get("Content-Length") or 0)
-            if clen:
-                total = clen + offset
-            got = offset
-            pausing = False
-            with open(tmp, "ab" if resumed else "wb") as f:
-                while True:
-                    if cancelled is not None and cancelled():
-                        raise DownloadCancelled()
-                    if paused is not None and paused():
-                        pausing = True          # 断开连接 → 回外层等恢复
-                        break
-                    chunk = r.read(_CHUNK)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    got += len(chunk)
-                    if on_bytes is not None:
-                        _safe(on_bytes, dst.name, got, total)
-                    if progress is not None and total:
-                        _safe(progress, f"下载 {dst.name}", int(got * 100 / total))
-        if not pausing:
-            break
-    tmp.replace(dst)
+    try:
+        while True:
+            _hold_while_paused(paused, cancelled)
+            offset = tmp.stat().st_size if tmp.is_file() else 0
+            req = urllib.request.Request(url)
+            if offset:
+                req.add_header("Range", f"bytes={offset}-")   # 续传：只要剩下的
+            with urllib.request.urlopen(req, timeout=60) as r:
+                code = 200
+                try:
+                    code = int(r.getcode() or 200)
+                except Exception:
+                    pass
+                resumed = offset > 0 and code == 206
+                if offset and not resumed:
+                    # 服务器不认 Range（返回 200 全量）：只能从头写，先清掉残片
+                    offset = 0
+                clen = int(r.headers.get("Content-Length") or 0)
+                if clen:
+                    total = clen + offset
+                got = offset
+                pausing = False
+                with open(tmp, "ab" if resumed else "wb") as f:
+                    while True:
+                        if cancelled is not None and cancelled():
+                            raise DownloadCancelled()
+                        if paused is not None and paused():
+                            pausing = True          # 断开连接 → 回外层等恢复
+                            break
+                        chunk = r.read(_CHUNK)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        got += len(chunk)
+                        if on_bytes is not None:
+                            _safe(on_bytes, dst.name, got, total)
+                        if progress is not None and total:
+                            _safe(progress, f"下载 {dst.name}", int(got * 100 / total))
+            if not pausing:
+                break
+        tmp.replace(dst)
+    except DownloadCancelled:
+        # 取消 = 放弃这次下载：.part 直接删掉，不留给「继续」。
+        # 暂停走的是 pausing 分支（不抛异常），所以暂停仍保留 .part 可续传。
+        # 这里文件句柄已经关了，删得掉；外层的「取消后清目录」再收尾已完成的文件。
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 def _sha256(path: Path) -> str:
@@ -146,3 +160,47 @@ def ensure_model_files(spec, progress=None, cancelled=None,
                 break
         if not ok:
             raise RuntimeError(f"模型 {spec.id} 的 {name} 下载失败（所有镜像都不可用）")
+
+
+def cleanup_model_dir(spec) -> tuple[int, str]:
+    """取消下载后的清场：删掉 engine/models/<id> 下的文件（含 .part），再删空目录。
+
+    只动统一目录，**不碰 legacy_dirs**——那里是和别的模型共用的旧目录（比如
+    Xiaomi-OCR-0 和 OvisOCR2 都指向 models/xiaomi-ocr-0/models），按目录清会把
+    另一个模型的文件一起带走。取消本身只意味着「这个模型这次没下成」。
+
+    返回 (删掉的文件数, 最后一个错误)；有错误通常是句柄还没放开，调用方等一下可重试。
+    """
+    d = registry.models_dir() / spec.id
+    if not d.is_dir():
+        return 0, ""
+    removed = 0
+    err = ""
+    for p in sorted(d.rglob("*")):
+        if not p.is_file():
+            continue
+        for _ in range(6):
+            try:
+                p.unlink()
+                removed += 1
+                break
+            except FileNotFoundError:
+                break
+            except PermissionError as exc:
+                # Windows 上线程刚退出时句柄可能还没释放，等半秒再试
+                err = str(exc)
+                time.sleep(0.5)
+            except Exception as exc:
+                err = str(exc)
+                break
+    try:
+        for sub in sorted(d.rglob("*"), reverse=True):
+            if sub.is_dir():
+                try:
+                    sub.rmdir()
+                except Exception:
+                    pass
+        d.rmdir()
+    except Exception as exc:
+        err = err or str(exc)
+    return removed, err

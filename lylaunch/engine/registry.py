@@ -3,8 +3,9 @@
 把原来散落在三处的 spec（doc_core / translator / chat）合并成一份 ModelDef。
 id 沿用旧 id（= preset 段名 = 请求体 "model" 值），迁移零成本。
 
-共 9 个模型：文档识别 2（xiaomi-ocr-0 / ovis-ocr2）、翻译 2（hy-mt2 1.8B / hy-mt2-7b）、
-本地 AI 5（qwen3-4b / 1.7b / vl-8b / qwen35-9b-v4-distill / deepseek-r1-14b）。
+共 11 个模型：文档识别 2（xiaomi-ocr-0 / ovis-ocr2）、翻译 2（hy-mt2 1.8B / hy-mt2-7b）、
+本地 AI 7（qwen3-4b / 1.7b / vl-8b / bonsai-25-27b / qwen35-9b-v4-distill /
+lfm25-8b-a1b / deepseek-r1-14b）。
 旧 qwen2.5-0.5B 翻译模型已移除（0.5B 能力不足，中译外几乎不翻）。
 """
 from __future__ import annotations
@@ -64,6 +65,12 @@ class ModelDef:
     note: str = ""
     points: tuple[str, ...] = ()
     vram: str = ""
+    # 详细设置页用的补充信息：谁做的、跑起来要多少内存
+    org: str = ""
+    ram: str = ""
+    # 界面小标签（纯展示，配色由 settings_models._TAG_STYLE 决定）：
+    # 只放「一句话能看懂、且与 caps 不重复」的信息，最多两个。
+    tags: tuple[str, ...] = ()
     # 迁移：相对 %LocalAppData%\LyLaunch 的旧目录（P2 硬链接用）
     legacy_dirs: tuple[str, ...] = ()
 
@@ -107,14 +114,17 @@ MODELS: list[ModelDef] = [
         sampling={"temperature": 0, "top_p": 0.8, "repeat_penalty": 1.05, "max_tokens": 4096},
         caps=("vision", "ocr"),
         prompt=PROMPT_XIAOMI, dialect="xiaomi",
-        note="中文票据 / 截图 / 手写更稳 · 轻量快速",
+        note="小米 2026 年 10 月开源的 0.8B 文档理解模型，基座是 Qwen3.5-0.8B。除了转文字，还能按字段抽发票 / 卡证信息、做 OCR 视觉问答；OmniDocBench v1.6 拿到 96.83，1B 以下排第一。",
         points=(
             "中文票据、截图、手写稿识别更稳",
             "整页转 Markdown，表格自动还原",
             "轻量快速，短页出字更快",
             "适合文字清晰的单页；扫描件建议 OvisOCR2",
         ),
+        org="小米 · Xiaomi Research（SeerRay-Lab）",
         vram="约 1GB 显存",
+        ram="建议 4GB 内存（纯 CPU 也能跑）",
+        tags=("轻量",),
         legacy_dirs=("models/xiaomi-ocr-0/models",),
     ),
     ModelDef(
@@ -127,8 +137,11 @@ MODELS: list[ModelDef] = [
                   "repeat_penalty": 1.0, "max_tokens": 4096},
         caps=("text", "translate"),
         license="Apache-2.0",
-        note="高质量翻译 · 长句、专业内容、多语言最稳",
+        note="混元 Hy-MT2 系列的 7B 中杯，2026 年 5 月开源，支持 33 种语言互译（含民汉）。会按术语表、分隔符、上下文、风格这些指令来翻，Flores200 / WMT25 上超过 DeepSeek-V4-Pro、Kimi K2.6 等更大的模型。",
+        org="腾讯混元 · Tencent Hunyuan",
         vram="约 5GB 显存",
+        ram="建议 8GB 内存",
+        tags=("大显存",),
         legacy_dirs=("models/llm/models",),
     ),
     ModelDef(
@@ -142,14 +155,17 @@ MODELS: list[ModelDef] = [
         caps=("vision", "ocr"),
         prompt=PROMPT_OVISOCR2, dialect="ovisocr2",
         license="Apache 2.0",
-        note="扫描件 / 图片型 PDF 首选 · 输出干净",
+        note="阿里云 2026 年 7 月开源的 0.8B 端到端文档解析模型，同样后训练自 Qwen3.5-0.8B。一张图直接出 Markdown，不再拆「版面分析 + 内容识别」两段流水线；OmniDocBench v1.6 得 96.58，是端到端路线第一次登顶。",
         points=(
             "扫描件、图片型 PDF 输出干净 Markdown，无版面标签",
             "按阅读顺序，多栏论文、密集表格更准",
             "公式转 LaTeX，表格结构化还原",
             "长页上限 8K token，不易截断 / 少复读",
         ),
+        org="阿里云 · ATH-MaaS（阿里巴巴集团）",
         vram="约 1GB 显存（0.8B，比 Xiaomi 更轻）",
+        ram="建议 4GB 内存（纯 CPU 也能跑）",
+        tags=("轻量",),
         legacy_dirs=("models/xiaomi-ocr-0/models",),
     ),
     ModelDef(
@@ -163,8 +179,11 @@ MODELS: list[ModelDef] = [
                   "repeat_penalty": 1.05, "min_p": 0},
         caps=("text", "translate"),
         license="Apache-2.0",
-        note="翻译专用 · 质量高",
+        note="混元 Hy-MT2 的轻量版。虽只有 1.8B，翻译质量却压过 Microsoft Translator、豆包翻译这些商业 API，同样支持 33 语种互译和术语表 / 风格指令；批量长文翻译时吞吐最划算。",
+        org="腾讯混元 · Tencent Hunyuan",
         vram="约 1GB 显存",
+        ram="建议 4GB 内存（纯 CPU 也能跑）",
+        tags=("轻量",),
         legacy_dirs=("models/llm/models",),
     ),
     ModelDef(
@@ -175,8 +194,11 @@ MODELS: list[ModelDef] = [
         ctx=8192, ngl=99, jinja=True,
         sampling={"temperature": 0.7, "max_tokens": 1024},
         caps=("text", "chat", "thinking"),
-        note="推荐 · 8GB 显存甜点，日常够用",
+        note="阿里 Qwen3 系列的 4B 稠密模型（2025 年 4 月开源），可在「先想再答」和直答之间切换，覆盖 119 种语言，原生 32K 上下文。4B 是本地对话的甜点：8GB 显存还能留出上下文，速度和质量都不难受。",
+        org="阿里 · Qwen 团队",
         vram="约 2.4GB 显存",
+        ram="建议 6GB 内存",
+        tags=("推荐", "会思考"),
         legacy_dirs=("models/qwen3-4b/models",),
     ),
     ModelDef(
@@ -187,8 +209,11 @@ MODELS: list[ModelDef] = [
         ctx=8192, ngl=99, jinja=True,
         sampling={"temperature": 0.7, "max_tokens": 1024},
         caps=("text", "chat", "thinking"),
-        note="最轻 · 核显/CPU 也能跑",
+        note="Qwen3 系列最小的一档（1.7B 稠密，2025 年 4 月），同样带思考模式、覆盖 119 种语言。核显或纯 CPU 就能跑，适合当常驻的轻量助手、分类打标；难题上会明显不如 4B。",
+        org="阿里 · Qwen 团队",
         vram="约 1.1GB 显存",
+        ram="建议 4GB 内存（纯 CPU 可跑）",
+        tags=("低配友好", "CPU 可用"),
         legacy_dirs=("models/qwen3-1.7b/models",),
     ),
     ModelDef(
@@ -203,9 +228,35 @@ MODELS: list[ModelDef] = [
         ctx_max=65536, kv_cache="q8_0",
         sampling={"temperature": 0.7, "max_tokens": 1024},
         caps=("vision", "chat"),
-        note="能看图 · 文档/表格/截图理解，需 12GB 显存",
-        vram="约 5.5GB 显存",
+        note="Qwen3-VL 的 8B Instruct 版，原生视觉语言模型：看图、读表格、认截图里的字，支持 32 种语言 OCR。它比 OCR 专用模型更会「理解」图片，但输出格式不如 OCR 模型规整；原生支持 256K 上下文，12GB 卡上只给到 64K。",
+        org="阿里 · Qwen 团队",
+        vram="约 5.5GB 显存（12GB 卡更稳）",
+        ram="建议 12GB 内存",
+        tags=("能看图", "大显存"),
         legacy_dirs=("models/qwen3-vl-8b/models",),
+    ),
+    ModelDef(
+        id="bonsai-25-27b",
+        display="Ternary Bonsai 2.5 27B",
+        short_name="Bonsai 2.5 27B",
+        file="Ternary-Bonsai-2.5-27B-Q2_0.gguf", size=7673194848,
+        mmproj="Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf", mmproj_size=629246976,
+        sha256="84496171ca79d4d33fb45612a2afd8303ec494baf916281023b7dc9cb3b3b9fa",
+        repos=("prism-ml/Ternary-Bonsai-2.5-27B-GGUF",),
+        # 只收 Q2_0：PTQ1_0 / PQ2_0 是 PrismML fork 的私有量化类型，标准 llama.cpp 直接拒载
+        # （老构建甚至会「能加载但输出垃圾」）。Q2_0 走官方 b11556+ 的 Hadamard 路径，
+        # 随包 runtime 是 b12047，llama.dll 里同时有 qwen35 与 hadamard，能加载。
+        # 7.7GB 主模型 + 0.6GB 视觉投影，12GB 卡只敢给 8K；原生 262K 是给大显存准备的。
+        ctx=8192, ctx_max=16384, ngl=99, jinja=True, reasoning="deepseek",
+        sampling={"temperature": 1.0, "top_p": 0.95, "top_k": 20,
+                  "min_p": 0, "max_tokens": 4096},
+        caps=("vision", "chat", "thinking"),
+        license="Apache-2.0",
+        note="PrismML 2026 年 11 月发布的 27B「三值」模型：权重只取 -1 / 0 / +1，5.9GB 就装下 27B，还能看图、调工具。智能体编程是强项（SWE-bench Verified 75.6），但思考默认 xhigh，出字慢，简单问题容易想太久。",
+        org="PrismML（基于 Qwen3.8 27B 三值量化）",
+        vram="约 8.3GB 显存（含视觉投影，8K 上下文）",
+        ram="建议 12GB 内存（100K 上下文约 14.7GB）",
+        tags=("能看图", "省显存"),
     ),
     ModelDef(
         id="qwen35-9b-v4-distill",
@@ -217,9 +268,33 @@ MODELS: list[ModelDef] = [
         ctx=16384, ngl=99, jinja=True, reasoning="deepseek",
         sampling={"temperature": 0.7, "max_tokens": 1024},
         caps=("vision", "chat", "thinking"),
-        note="底座 Qwen3.5-9B，用 DeepSeek-V4-Flash 推理数据训练；会思考、也能看图",
+        note="社区作者 Jackrong 用 DeepSeek-V4-Flash 的推理数据（8000 条蒸馏集）微调 Qwen3.5-9B 得到。保留 Qwen3.5 的原生多模态与 262K 上下文，思路更像 DeepSeek：先写思维链再答，简单题偶尔想过头。",
+        org="Jackrong（社区蒸馏，基座 Qwen3.5-9B）",
         vram="约 7.5GB 显存（16K 上下文）",
+        ram="建议 12GB 内存",
+        tags=("能看图", "会思考"),
         legacy_dirs=("models/qwen35-9b-v4-distill/models",),
+    ),
+    ModelDef(
+        id="lfm25-8b-a1b",
+        display="LFM2.5-8B-A1B",
+        short_name="LFM2.5 8B",
+        file="LFM2.5-8B-A1B-UD-Q4_K_M.gguf", size=5322223200,
+        sha256="e2c8350d5e6e7c633b2ba4e20805a2c86bc46884cd285e8f3fe36ad917b772c7",
+        repos=("unsloth/LFM2.5-8B-A1B-GGUF",),
+        # 24 层里只有 6 层 GQA，KV 开销很小 → 插件这套给到 32K 也不吃显存；
+        # 原生 128K 只留给外部集成（那里的硬上限靠 ctx_max 拦）。
+        ctx=32768, ctx_max=131072, ngl=99, jinja=True, reasoning="deepseek",
+        sampling={"temperature": 0.2, "top_k": 80, "repeat_penalty": 1.05,
+                  "max_tokens": 4096},
+        caps=("text", "chat", "thinking"),
+        license="LFM Open License v1.0",
+        note="Liquid AI 2026 年 5 月的端侧 MoE：8.3B 总参数、每个 token 只激活 1.5B，128K 上下文，主打工具调用和复杂指令遵循，同尺寸里吞吐最快。纯文本，且强制思维链（关不掉），每次回答都要先想一段。",
+        org="Liquid AI",
+        vram="约 5.3GB 显存",
+        ram="建议 8GB 内存（32K 上下文约 6GB）",
+        tags=("省显存", "会思考"),
+        legacy_dirs=("models/lfm25-8b-a1b/models",),
     ),
     ModelDef(
         id="deepseek-r1-14b",
@@ -229,8 +304,11 @@ MODELS: list[ModelDef] = [
         ctx=4096, ngl=99, jinja=True, reasoning="deepseek",
         sampling={"temperature": 0.7, "max_tokens": 1024},
         caps=("text", "chat", "thinking"),
-        note="推理强 · 会先思考再答（慢）；12GB 显存偏紧，上下文压到 4096",
-        vram="约 8.6GB 显存（偏紧）",
+        note="DeepSeek-R1 的 14B 蒸馏版（R1-Distill-Qwen-14B），2025 年 1 月随 R1 一起开源：用 R1 生成的推理轨迹训练 Qwen-14B。数学和代码推理明显强于同尺寸通用模型，代价是先写一大段思考；14B 在 12GB 卡上偏紧，上下文只能给 4K。",
+        org="DeepSeek（R1 蒸馏到 Qwen-14B）",
+        vram="约 8.6GB 显存（4K 上下文，偏紧）",
+        ram="建议 16GB 内存",
+        tags=("会思考", "大显存"),
         legacy_dirs=("models/deepseek-r1-14b/models",),
     ),
 ]

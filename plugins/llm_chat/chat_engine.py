@@ -19,8 +19,8 @@ DEFAULT_PORT = 18090          # 全局 Router 端口（旧 18082 已废弃）
 CTX_DEFAULT = 8192
 DEFAULT_MODEL_ID = "qwen3-4b"
 
-_CHAT_IDS = ("qwen3-4b", "qwen3-1.7b", "qwen3-vl-8b",
-             "qwen35-9b-v4-distill", "deepseek-r1-14b")
+_CHAT_IDS = ("qwen3-4b", "qwen3-1.7b", "qwen3-vl-8b", "bonsai-25-27b",
+             "qwen35-9b-v4-distill", "lfm25-8b-a1b", "deepseek-r1-14b")
 _MS = "https://modelscope.cn/models/{repo}/resolve/master/{name}"
 
 

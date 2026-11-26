@@ -589,17 +589,45 @@ class SettingsWindow(QDialog):
             pv_page.setSpacing(14)
             self._page(key, pv_page)
             pv_page.addStretch(1)
+            self._stack.addWidget(self._scroll_page(page))
 
-            sa = QScrollArea()
-            sa.setWidget(page)
-            sa.setWidgetResizable(True)
-            sa.setFrameShape(QFrame.Shape.NoFrame)
-            sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            sa.setStyleSheet(
-                "QScrollArea{background:transparent; border:none;}"
-                " QScrollArea > QWidget > QWidget{background:transparent;}")
-            sa.viewport().setAutoFillBackground(False)
-            self._stack.addWidget(sa)
+        # 「模型详细设置」：藏在这一栈的最后，不在左侧导航里。
+        # 只从「本地模型」页点某个模型进入，左上角返回列表——
+        # 详细内容放独立一页，列表才能只留名字、标签和一个主动作。
+        detail_page = QWidget()
+        detail_page.setStyleSheet("background:transparent;")
+        dp_lay = QVBoxLayout(detail_page)
+        dp_lay.setContentsMargins(0, 0, 6, 0)
+        dp_lay.setSpacing(14)
+        from .settings_models import build_models_detail_page
+        self.models_detail = build_models_detail_page(self, dp_lay)
+        dp_lay.addStretch(1)
+        self._models_detail_sa = self._scroll_page(detail_page)
+        self._stack.addWidget(self._models_detail_sa)
+
+    def _scroll_page(self, page: QWidget) -> QScrollArea:
+        """给一页套透明滚动区：卡片高了就滚，窗口高度不必跟着内容长。"""
+        sa = QScrollArea()
+        sa.setWidget(page)
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.Shape.NoFrame)
+        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sa.setStyleSheet(
+            "QScrollArea{background:transparent; border:none;}"
+            " QScrollArea > QWidget > QWidget{background:transparent;}")
+        sa.viewport().setAutoFillBackground(False)
+        return sa
+
+    # ---------- 模型详细设置（不在导航里的子页）
+    def open_models_detail(self, spec) -> None:
+        """从「本地模型」点模型：切到详情页，导航高亮仍停在「本地模型」。"""
+        self.models_detail.show_model(spec)
+        self._stack.setCurrentWidget(self._models_detail_sa)
+        self._fade_in(self._models_detail_sa)
+
+    def back_to_models(self) -> None:
+        idx = self._pages.index("models") if "models" in self._pages else 0
+        self._go(idx)
 
     def _nav_items(self) -> list[tuple[str, str]]:
         """导航项顺序即分页顺序。"""
