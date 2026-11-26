@@ -43,6 +43,10 @@ tools/
 # 本地专用插件：随安装包分发，但不进开源仓库（目录级忽略，spec 的 collect_plugins 仍会收进包）
 plugins/fps_overlay/
 
+# 非内置插件（plugin_pack 下的可选插件）源码不入仓库：目录级忽略，只通过 dist_plugins/*.zip
+# 与 Release 附件分发。本机目录是唯一副本，别靠 git 找回；README-安装说明.txt 仍入库。
+plugin_pack/*/
+
 # 构建脚本与产物（仅本地打包使用，不入库）
 build/
 dist/
